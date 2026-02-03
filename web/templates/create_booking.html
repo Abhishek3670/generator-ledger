@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1>➕ Create New Booking</h1>
+    
+    <form id="bookingForm" class="form">
+        <fieldset>
+            <legend>Booking Details</legend>
+            
+            <div class="form-group">
+                <label for="vendor_id">Vendor *</label>
+                <select id="vendor_id" name="vendor_id" required>
+                    <option value="">-- Select Vendor --</option>
+                    {% for vendor in vendors %}
+                    <option value="{{ vendor.vendor_id }}">
+                        {{ vendor.vendor_id }} - {{ vendor.vendor_name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </fieldset>
+        
+        <fieldset>
+            <legend>Generator Assignment</legend>
+            
+            <div class="form-group">
+                <label>
+                    <input type="radio" name="assign_method" value="generator" checked>
+                    Assign by Generator ID
+                </label>
+                <label>
+                    <input type="radio" name="assign_method" value="capacity">
+                    Assign by Capacity (Auto-assign)
+                </label>
+            </div>
+            
+            <div id="generator-method" style="display: block;">
+                <div class="form-group">
+                    <label for="generator_id">Generator</label>
+                    <select id="generator_id" name="generator_id">
+                        <option value="">-- Select Generator --</option>
+                        {% for gen in generators %}
+                        <option value="{{ gen.generator_id }}">
+                            {{ gen.generator_id }} - {{ gen.capacity_kva }} kVA
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            
+            <div id="capacity-method" style="display: none;">
+                <div class="form-group">
+                    <label for="capacity_kva">Capacity (kVA)</label>
+                    <select id="capacity_kva" name="capacity_kva">
+                        <option value="">-- Select Capacity --</option>
+                        {% for cap in capacities %}
+                        <option value="{{ cap }}">{{ cap }} kVA</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>📅 Booking Dates *</label>
+                <div id="dates-container" style="border: 1px solid #ddd; padding: 10px; border-radius: 4px;">
+                    <div class="date-item" style="display: flex; gap: 10px; margin-bottom: 10px; align-items: center;">
+                        <input type="date" class="booking-date" required style="flex: 1;">
+                        <button type="button" class="btn-remove-date" style="padding: 5px 10px; background: #ccc; color: #666; border: none; border-radius: 4px; cursor: not-allowed;" disabled title="At least one date is required">Remove</button>
+                    </div>
+                </div>
+                <button type="button" id="add-date-btn" style="margin-top: 10px; padding: 8px 16px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;">+ Add Date</button>
+            </div>
+            
+            <div class="form-group">
+                <label for="remarks">Remarks (optional)</label>
+                <textarea id="remarks" name="remarks" rows="3"></textarea>
+            </div>
+        </fieldset>
+        
+        <div class="form-actions">
+            <button type="submit" class="btn-primary">Create Booking</button>
+            <a href="/bookings" class="btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Function to update remove button states
+    function updateRemoveButtons() {
+        const dateItems = document.querySelectorAll('.date-item');
+        dateItems.forEach((item, index) => {
+            const removeBtn = item.querySelector('.btn-remove-date');
+            if (dateItems.length === 1) {
+                // Disable the remove button if it's the only date
+                removeBtn.disabled = true;
+                removeBtn.style.background = '#ccc';
+                removeBtn.style.color = '#666';
+                removeBtn.style.cursor = 'not-allowed';
+                removeBtn.title = 'At least one date is required';
+            } else {
+                // Enable the remove button
+                removeBtn.disabled = false;
+                removeBtn.style.background = '#f44336';
+                removeBtn.style.color = 'white';
+                removeBtn.style.cursor = 'pointer';
+                removeBtn.title = 'Remove this date';
+            }
+        });
+    }
+
+    // Handle assign method radio buttons
+    document.querySelectorAll('input[name="assign_method"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            if (this.value === 'generator') {
+                document.getElementById('generator-method').style.display = 'block';
+                document.getElementById('capacity-method').style.display = 'none';
+            } else {
+                document.getElementById('generator-method').style.display = 'none';
+                document.getElementById('capacity-method').style.display = 'block';
+            }
+        });
+    });
+
+    // Handle adding new date inputs
+    const addDateBtn = document.getElementById('add-date-btn');
+    if (addDateBtn) {
+        addDateBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            const container = document.getElementById('dates-container');
+            const dateItem = document.createElement('div');
+            dateItem.className = 'date-item';
+            dateItem.style.cssText = 'display: flex; gap: 10px; margin-bottom: 10px; align-items: center;';
+            dateItem.innerHTML = `
+                <input type="date" class="booking-date" required style="flex: 1;">
+                <button type="button" class="btn-remove-date" style="padding: 5px 10px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">Remove</button>
+            `;
+            container.appendChild(dateItem);
+            
+            // Add remove handler to new button
+            dateItem.querySelector('.btn-remove-date').addEventListener('click', function(e) {
+                e.preventDefault();
+                dateItem.remove();
+                updateRemoveButtons();
+            });
+            
+            updateRemoveButtons();
+        });
+    }
+
+    // Handle removing date inputs
+    document.querySelectorAll('.btn-remove-date').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            if (!this.disabled) {
+                this.closest('.date-item').remove();
+                updateRemoveButtons();
+            }
+        });
+    });
+
+    // Form submission
+    const bookingForm = document.getElementById('bookingForm');
+    if (bookingForm) {
+        bookingForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            try {
+                const vendorId = document.getElementById('vendor_id').value;
+                if (!vendorId) {
+                    alert('Please select a vendor');
+                    return;
+                }
+                
+                const assignMethod = document.querySelector('input[name="assign_method"]:checked').value;
+                const remarks = document.getElementById('remarks').value;
+                
+                // Collect all selected dates
+                const dateInputs = document.querySelectorAll('.booking-date');
+                const dates = Array.from(dateInputs).map(input => input.value).filter(date => date);
+                
+                console.log('Form data:', { vendorId, dates, assignMethod, remarksCount: remarks.length });
+                
+                if (dates.length === 0) {
+                    alert('Please select at least one date');
+                    return;
+                }
+                
+                let generatorId = null;
+                let capacityKva = null;
+                
+                if (assignMethod === 'generator') {
+                    generatorId = document.getElementById('generator_id').value;
+                    if (!generatorId) {
+                        alert('Please select a generator');
+                        return;
+                    }
+                } else {
+                    capacityKva = document.getElementById('capacity_kva').value;
+                    if (!capacityKva) {
+                        alert('Please select a capacity');
+                        return;
+                    }
+                }
+                
+                // Create an item for each date
+                const items = dates.map(date => {
+                    const item = {
+                        'date': date,
+                        'remarks': remarks
+                    };
+                    
+                    if (generatorId) {
+                        item['generator_id'] = generatorId;
+                    } else {
+                        item['capacity_kva'] = parseInt(capacityKva);
+                    }
+                    
+                    return item;
+                });
+                
+                console.log('Submitting booking:', {
+                    'vendor_id': vendorId,
+                    'items': items
+                });
+                
+                const response = await fetch('/api/bookings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        'vendor_id': vendorId,
+                        'items': items
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    alert(`Booking created successfully!\nBooking ID: ${data.booking_id}\nDates: ${dates.length}`);
+                    window.location.href = `/booking/${data.booking_id}`;
+                } else {
+                    alert('Error: ' + JSON.stringify(data.detail));
+                }
+            } catch (error) {
+                alert('Error creating booking: ' + error.message);
+                console.error(error);
+            }
+        });
+    }
+    
+    // Initial state setup
+    updateRemoveButtons();
+});
+</script>
+{% endblock %}

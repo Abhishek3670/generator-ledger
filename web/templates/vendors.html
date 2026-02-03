@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1>👥 Vendors</h1>
+    
+    {% if vendors %}
+    <div class="filter-section" style="margin-bottom: 20px;">
+        <input type="text" id="vendorFilter" class="filter-input" placeholder="🔍 Search by Vendor ID, Name, or Place..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+    </div>
+    <table class="data-table" id="vendorTable">
+        <thead>
+            <tr>
+                <th>Vendor ID</th>
+                <th>Name</th>
+                <th>Location</th>
+                <th>Phone</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for vendor in vendors %}
+            <tr>
+                <td><strong>{{ vendor.vendor_id }}</strong></td>
+                <td>{{ vendor.vendor_name }}</td>
+                <td>{{ vendor.vendor_place or '-' }}</td>
+                <td>{{ vendor.phone or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="info-box">
+        <p>No vendors loaded. Please check the data files in the Data/ folder.</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+document.getElementById('vendorFilter')?.addEventListener('keyup', function() {
+    const filter = this.value.toUpperCase();
+    const table = document.getElementById('vendorTable');
+    if (!table) return;
+    const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+    
+    for (let i = 0; i < rows.length; i++) {
+        const text = rows[i].textContent.toUpperCase();
+        rows[i].style.display = text.includes(filter) ? '' : 'none';
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1>📅 Bookings</h1>
+    
+    {% if bookings %}
+    <div class="filter-section" style="margin-bottom: 20px;">
+        <input type="text" id="bookingFilter" class="filter-input" placeholder="🔍 Search by Booking ID, Vendor, or Status..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+    </div>
+    <table class="data-table" id="bookingTable">
+        <thead>
+            <tr>
+                <th>Booking ID</th>
+                <th>Vendor</th>
+                <th>Generators</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for book in bookings %}
+            <tr>
+                <td><strong>{{ book.booking.booking_id }}</strong></td>
+                <td>{{ book.vendor_name }}</td>
+                <td>{{ book.item_count }}</td>
+                <td>
+                    {% if book.booking.status == 'Confirmed' %}
+                        <span class="badge" style="background-color: #4CAF50;">{{ book.booking.status }}</span>
+                    {% elif book.booking.status == 'Pending' %}
+                        <span class="badge" style="background-color: #FFC107;">{{ book.booking.status }}</span>
+                    {% else %}
+                        <span class="badge" style="background-color: #f44336;">{{ book.booking.status }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ book.booking.created_at }}</td>
+                <td>
+                    <a href="/booking/{{ book.booking.booking_id }}" class="btn-small">View</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="info-box">
+        <p>No bookings yet. <a href="/create-booking">Create one now</a></p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+document.getElementById('bookingFilter')?.addEventListener('keyup', function() {
+    const filter = this.value.toUpperCase();
+    const table = document.getElementById('bookingTable');
+    if (!table) return;
+    const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+    
+    for (let i = 0; i < rows.length; i++) {
+        const text = rows[i].textContent.toUpperCase();
+        rows[i].style.display = text.includes(filter) ? '' : 'none';
+    }
+});
+</script>
+{% endblock %}

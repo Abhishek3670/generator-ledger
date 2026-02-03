@@ -1,0 +1,30 @@
+Generator_ID,Capacity_KVA,Identification ,Type,Status,Notes
+GEN-20KVA-PL-HA-01,20,Plain(सादा),HA,Active,-
+GEN-20KVA-PL-HARA-02,20,Plain(सादा),HATA,Active,-
+GEN-20KVA-RD-RBTA-03,20,Red (लाल),RBTA,Active,-
+GEN-20KVA-BU-RB-04,20,Blue (नीला),RB,Active,-
+GEN-20KVA-BU-RB-05,20,Blue (नीला),RB,Active,-
+GEN-20KVA-BU-RB-06,20,Blue (नीला),RB,Active,With Body
+GEN-30KVA-TT-HA-01,30,Thin tyre (पतला टायर),HA,Active,पतला टायर
+GEN-30KVA-BU-HA-02,30,Blue (नीला),HA,Active,-
+GEN-30KVA-PL-RBHA-03,30,Plain(सादा),RBHA,Active,-
+GEN-30KVA-PL-RBHA-04,30,Plain(सादा),RBHA,Active,-
+GEN-30KVA-PL-RBHA-05,30,Plain(सादा),RBHA,Active,-
+GEN-30KVA-PL-RBHA-06,30,Plain(सादा),RBHA,Active,-
+GEN-45KVA-PL-4R-01,45,Plain(सादा),4R,Active,-
+GEN-45KVA-PL-HA-02,45,Plain(सादा),HA,Active,-
+GEN-45KVA-PL-HA-03,45,Plain(सादा),HA,Active,-
+GEN-45KVA-PL-HA-04,45,Plain(सादा),HA,Active,-
+GEN-45KVA-PL-HA-05,45,Plain(सादा),HA,Active,-
+GEN-45KVA-PL-HA-06,45,Plain(सादा),HA,Active,-
+GEN-45KVA-PL-HA-07,45,Plain(सादा),HA,Active,-
+GEN-45KVA-PL-HA-08,45,Plain(सादा),3 Phase HA-6,Active,-
+GEN-45KVA-PL-HA-09,45,Plain(सादा),3 Phase HA-6,Active,-
+GEN-45KVA-PL-HA-10,45,Plain(सादा),3 Phase HA-6,Active,-
+GEN-82KVA-RD-01,82,Red (लाल),-,Active,-
+GEN-82KVA-BU-02,82,Blue (नीला),-,Active,-
+GEN-82KVA-BU-03,82,Blue (नीला),-,Active,-
+GEN-82KVA-YL-04,82,Yellow (पीला),-,Active,-
+GEN-100KVA-6R-01,100,Plain(सादा),6R,Active,-
+GEN-100KVA-02,100,Black (काला),-,Active,-
+GEN-125KVA-SL90-01,125,Red (लाल),SL90,Active,-

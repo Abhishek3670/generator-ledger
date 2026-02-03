@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1>📋 Booking: {{ booking.booking_id }}</h1>
+    
+    <div class="detail-section">
+        <h2>Booking Information</h2>
+        <dl class="detail-list">
+            <dt>Booking ID:</dt>
+            <dd>{{ booking.booking_id }}</dd>
+            
+            <dt>Vendor:</dt>
+            <dd>{{ vendor.vendor_name if vendor else 'Unknown' }}</dd>
+            
+            <dt>Status:</dt>
+            <dd>
+                <span class="badge" 
+                      style="background-color: {% if booking.status == 'Confirmed' %}#4CAF50{% elif booking.status == 'Pending' %}#FFC107{% else %}#f44336{% endif %};">
+                    {{ booking.status }}
+                </span>
+            </dd>
+            
+            <dt>Created:</dt>
+            <dd>{{ booking.created_at }}</dd>
+        </dl>
+    </div>
+    
+    <div class="detail-section">
+        <h2>Assigned Generators</h2>
+        {% if items %}
+        <div class="filter-section" style="margin-bottom: 15px;">
+            <input type="text" id="itemFilter" class="filter-input" placeholder="🔍 Search by Generator, Date, or Status..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+        </div>
+        <table class="data-table" id="itemTable">
+            <thead>
+                <tr>
+                    <th>Generator</th>
+                    <th>Start</th>
+                    <th>End</th>
+                    <th>Status</th>
+                    <th>Remarks</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item_info in items %}
+                <tr>
+                    <td><strong>{{ item_info.generator_name }}</strong></td>
+                    <td>{{ item_info.item.start_dt }}</td>
+                    <td>{{ item_info.item.end_dt }}</td>
+                    <td>
+                        <span class="badge" 
+                              style="background-color: {% if item_info.item.item_status == 'Confirmed' %}#4CAF50{% else %}#f44336{% endif %};">
+                            {{ item_info.item.item_status }}
+                        </span>
+                    </td>
+                    <td>{{ item_info.item.remarks or '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No generators assigned yet.</p>
+        {% endif %}
+    </div>
+    
+    <div class="actions">
+        {% if booking.status == 'Confirmed' %}
+        <form method="post" action="/api/bookings/{{ booking.booking_id }}/cancel" style="display: inline;">
+            <button type="submit" class="btn-danger" onclick="return confirm('Are you sure you want to cancel this booking?')">
+                Cancel Booking
+            </button>
+        </form>
+        {% endif %}
+        <a href="/bookings" class="btn-secondary">Back to Bookings</a>
+    </div>
+</div>
+
+<script>
+document.getElementById('itemFilter')?.addEventListener('keyup', function() {
+    const filter = this.value.toUpperCase();
+    const table = document.getElementById('itemTable');
+    if (!table) return;
+    const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+    
+    for (let i = 0; i < rows.length; i++) {
+        const text = rows[i].textContent.toUpperCase();
+        rows[i].style.display = text.includes(filter) ? '' : 'none';
+    }
+});
+</script>
+{% endblock %}

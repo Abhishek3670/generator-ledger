@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: generator-ledger-web
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./Data:/app/Data
+      - ./exported_data:/app/exported_data
+      - ./archives:/app/archives
+      - ./ledger.db:/app/ledger.db
+    environment:
+      - DB_PATH=/app/ledger.db
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEBUG=False
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  ledger_data:

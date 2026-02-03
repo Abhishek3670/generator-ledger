@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1>📊 Dashboard</h1>
+    
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ total_bookings }}</div>
+            <div class="stat-label">Total Bookings</div>
+            <div class="stat-sub">{{ confirmed_bookings }} Confirmed</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value">{{ total_generators }}</div>
+            <div class="stat-label">Generators</div>
+            <div class="stat-sub">{{ active_generators }} Active</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value">{{ total_vendors }}</div>
+            <div class="stat-label">Vendors</div>
+            <div class="stat-sub">Total Partners</div>
+        </div>
+    </div>
+    
+    <div class="actions-grid">
+        <a href="/generators" class="action-card">
+            <div class="action-icon">⚙️</div>
+            <div class="action-title">View Generators</div>
+            <div class="action-desc">Manage fleet inventory</div>
+        </a>
+        
+        <a href="/vendors" class="action-card">
+            <div class="action-icon">👥</div>
+            <div class="action-title">Manage Vendors</div>
+            <div class="action-desc">View all partners</div>
+        </a>
+        
+        <a href="/bookings" class="action-card">
+            <div class="action-icon">📅</div>
+            <div class="action-title">View Bookings</div>
+            <div class="action-desc">Check reservations</div>
+        </a>
+        
+        <a href="/create-booking" class="action-card primary">
+            <div class="action-icon">➕</div>
+            <div class="action-title">Create Booking</div>
+            <div class="action-desc">New reservation</div>
+        </a>
+    </div>
+    
+    <div class="info-section">
+        <h2>📌 Quick Info</h2>
+        <ul>
+            <li>All bookings and assignments are managed in real-time</li>
+            <li>Generators are automatically assigned based on capacity and availability</li>
+            <li>View API documentation at <a href="/docs">/docs</a></li>
+        </ul>
+    </div>
+</div>
+{% endblock %}

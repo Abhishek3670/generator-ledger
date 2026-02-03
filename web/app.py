@@ -1,0 +1,449 @@
+"""
+FastAPI web application for Generator Booking Ledger.
+"""
+
+from fastapi import FastAPI, Request, HTTPException, Form, Depends
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+import os
+import sqlite3
+from typing import Optional, List, Dict, Any
+import logging
+from pydantic import BaseModel
+
+from core import (
+    DatabaseManager,
+    BookingService,
+    DataLoader,
+    ExportService,
+    GeneratorRepository,
+    VendorRepository,
+    BookingRepository,
+)
+from core.services import create_vendor, archive_all_bookings
+
+# Initialize logging
+from config import setup_logging, DB_PATH, HOST, PORT, DEBUG, APP_TITLE, APP_VERSION
+setup_logging()
+
+logger = logging.getLogger(__name__)
+
+# Pydantic models for request bodies
+class BookingItem(BaseModel):
+    generator_id: Optional[str] = None
+    capacity_kva: Optional[int] = None
+    date: str
+    remarks: str = ""
+
+class CreateBookingRequest(BaseModel):
+    vendor_id: str
+    items: List[BookingItem]
+
+# FastAPI app
+app = FastAPI(title=APP_TITLE, version=APP_VERSION)
+
+# Static files and templates
+template_dir = os.path.join(os.path.dirname(__file__), "templates")
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+templates = Jinja2Templates(directory=template_dir)
+
+# Global database manager
+db_manager: Optional[DatabaseManager] = None
+
+
+def get_db():
+    """Dependency for getting database connection."""
+    if db_manager is None or db_manager.conn is None:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    return db_manager.conn
+
+
+def initialize_app():
+    """Initialize database and services."""
+    global db_manager
+    db_manager = DatabaseManager(DB_PATH)
+    conn = db_manager.connect()
+    db_manager.init_schema()
+    
+    # Load sample data
+    loader = DataLoader(conn)
+    loader.load_from_excel()
+    
+    logger.info("FastAPI application initialized successfully")
+
+
+def shutdown_app():
+    """Shutdown and cleanup."""
+    global db_manager
+    if db_manager:
+        db_manager.close()
+    logger.info("FastAPI application shutdown")
+
+
+@app.on_event("startup")
+async def startup():
+    initialize_app()
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    shutdown_app()
+
+
+# ============================================================================
+# HEALTH CHECKS & INFO
+# ============================================================================
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "app": APP_TITLE,
+        "version": APP_VERSION
+    }
+
+
+@app.get("/api/info")
+async def app_info():
+    """Get application information."""
+    return {
+        "title": APP_TITLE,
+        "version": APP_VERSION,
+        "database": DB_PATH,
+    }
+
+
+# ============================================================================
+# WEB PAGES
+# ============================================================================
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    """Main dashboard page."""
+    try:
+        booking_repo = BookingRepository(conn)
+        gen_repo = GeneratorRepository(conn)
+        vendor_repo = VendorRepository(conn)
+        
+        bookings = booking_repo.get_all()
+        generators = gen_repo.get_all()
+        vendors = vendor_repo.get_all()
+        
+        # Count confirmed bookings and generators
+        confirmed_bookings = len([b for b in bookings if b.status == "Confirmed"])
+        active_generators = len([g for g in generators if g.status == "Active"])
+        total_vendors = len(vendors)
+        
+        return templates.TemplateResponse("index.html", {
+            "request": request,
+            "total_bookings": len(bookings),
+            "confirmed_bookings": confirmed_bookings,
+            "total_generators": len(generators),
+            "active_generators": active_generators,
+            "total_vendors": total_vendors,
+        })
+    except Exception as e:
+        logger.error(f"Error loading dashboard: {e}", exc_info=True)
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "error": str(e)
+        })
+
+
+@app.get("/generators", response_class=HTMLResponse)
+async def generators_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    """Generators list page."""
+    try:
+        gen_repo = GeneratorRepository(conn)
+        generators = gen_repo.get_all()
+        return templates.TemplateResponse("generators.html", {
+            "request": request,
+            "generators": generators
+        })
+    except Exception as e:
+        logger.error(f"Error loading generators page: {e}", exc_info=True)
+        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+
+
+@app.get("/vendors", response_class=HTMLResponse)
+async def vendors_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    """Vendors list page."""
+    try:
+        vendor_repo = VendorRepository(conn)
+        vendors = vendor_repo.get_all()
+        return templates.TemplateResponse("vendors.html", {
+            "request": request,
+            "vendors": vendors
+        })
+    except Exception as e:
+        logger.error(f"Error loading vendors page: {e}", exc_info=True)
+        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+
+
+@app.get("/bookings", response_class=HTMLResponse)
+async def bookings_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    """Bookings list page."""
+    try:
+        booking_repo = BookingRepository(conn)
+        vendor_repo = VendorRepository(conn)
+        
+        bookings = booking_repo.get_all()
+        
+        # Enrich bookings with vendor names and item counts
+        bookings_with_vendor = []
+        for booking in bookings:
+            vendor = vendor_repo.get_by_id(booking.vendor_id)
+            items = booking_repo.get_items(booking.booking_id)
+            bookings_with_vendor.append({
+                "booking": booking,
+                "vendor_name": vendor.vendor_name if vendor else "Unknown",
+                "item_count": len(items)
+            })
+        
+        return templates.TemplateResponse("bookings.html", {
+            "request": request,
+            "bookings": bookings_with_vendor
+        })
+    except Exception as e:
+        logger.error(f"Error loading bookings page: {e}", exc_info=True)
+        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+
+
+@app.get("/booking/{booking_id}", response_class=HTMLResponse)
+async def booking_detail_page(request: Request, booking_id: str, conn: sqlite3.Connection = Depends(get_db)):
+    """Booking detail page."""
+    try:
+        booking_repo = BookingRepository(conn)
+        vendor_repo = VendorRepository(conn)
+        gen_repo = GeneratorRepository(conn)
+        
+        booking = booking_repo.get_by_id(booking_id)
+        if not booking:
+            return templates.TemplateResponse("error.html", {
+                "request": request,
+                "error": f"Booking '{booking_id}' not found"
+            })
+        
+        vendor = vendor_repo.get_by_id(booking.vendor_id)
+        items = booking_repo.get_items(booking_id)
+        
+        # Enrich items with generator info
+        items_with_gen = []
+        for item in items:
+            gen = gen_repo.get_by_id(item.generator_id)
+            items_with_gen.append({
+                "item": item,
+                "generator_name": f"{gen.generator_id} ({gen.capacity_kva} kVA)" if gen else "Unknown"
+            })
+        
+        return templates.TemplateResponse("booking_detail.html", {
+            "request": request,
+            "booking": booking,
+            "vendor": vendor,
+            "items": items_with_gen
+        })
+    except Exception as e:
+        logger.error(f"Error loading booking detail: {e}", exc_info=True)
+        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+
+
+@app.get("/create-booking", response_class=HTMLResponse)
+async def create_booking_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    """Create booking page."""
+    try:
+        vendor_repo = VendorRepository(conn)
+        gen_repo = GeneratorRepository(conn)
+        
+        vendors = vendor_repo.get_all()
+        generators = gen_repo.get_all()
+        
+        # Get unique capacities
+        capacities = sorted(set(g.capacity_kva for g in generators))
+        
+        return templates.TemplateResponse("create_booking.html", {
+            "request": request,
+            "vendors": vendors,
+            "generators": generators,
+            "capacities": capacities
+        })
+    except Exception as e:
+        logger.error(f"Error loading create booking page: {e}", exc_info=True)
+        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+
+
+# ============================================================================
+# API ENDPOINTS
+# ============================================================================
+
+@app.get("/api/generators")
+async def api_generators(conn: sqlite3.Connection = Depends(get_db)):
+    """Get all generators."""
+    try:
+        gen_repo = GeneratorRepository(conn)
+        generators = gen_repo.get_all()
+        return [
+            {
+                "id": g.generator_id,
+                "capacity": g.capacity_kva,
+                "identification": g.identification,
+                "type": g.type,
+                "status": g.status,
+                "notes": g.notes
+            }
+            for g in generators
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching generators: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/vendors")
+async def api_vendors(conn: sqlite3.Connection = Depends(get_db)):
+    """Get all vendors."""
+    try:
+        vendor_repo = VendorRepository(conn)
+        vendors = vendor_repo.get_all()
+        return [
+            {
+                "id": v.vendor_id,
+                "name": v.vendor_name,
+                "place": v.vendor_place,
+                "phone": v.phone
+            }
+            for v in vendors
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching vendors: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/bookings")
+async def api_bookings(conn: sqlite3.Connection = Depends(get_db)):
+    """Get all bookings."""
+    try:
+        booking_repo = BookingRepository(conn)
+        bookings = booking_repo.get_all()
+        return [
+            {
+                "id": b.booking_id,
+                "vendor_id": b.vendor_id,
+                "created_at": b.created_at,
+                "status": b.status
+            }
+            for b in bookings
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching bookings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/bookings")
+async def api_create_booking(
+    request_data: CreateBookingRequest,
+    conn: sqlite3.Connection = Depends(get_db)
+):
+    """Create a new booking with auto-generated ID and items."""
+    try:
+        vendor_id = request_data.vendor_id
+        items = [item.dict() for item in request_data.items]
+        
+        logger.info(f"API booking request | context={{'vendor_id': '{vendor_id}', 'item_count': {len(items)}, 'items': {items}}}")
+        
+        if not vendor_id:
+            raise HTTPException(status_code=400, detail="vendor_id is required")
+        
+        if not items:
+            raise HTTPException(status_code=400, detail="At least one date must be selected")
+        
+        service = BookingService(conn)
+        # Create booking with auto-generated ID and items
+        booking_id = service.create_booking(vendor_id, items)
+        return {"success": True, "booking_id": booking_id}
+    except ValueError as e:
+        logger.warning(f"Validation error creating booking: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error creating booking: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/bookings/{booking_id}")
+async def api_booking_detail(booking_id: str, conn: sqlite3.Connection = Depends(get_db)):
+    """Get booking detail."""
+    try:
+        booking_repo = BookingRepository(conn)
+        booking = booking_repo.get_by_id(booking_id)
+        
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        items = booking_repo.get_items(booking_id)
+        
+        return {
+            "booking": {
+                "id": booking.booking_id,
+                "vendor_id": booking.vendor_id,
+                "created_at": booking.created_at,
+                "status": booking.status
+            },
+            "items": [
+                {
+                    "id": item.id,
+                    "generator_id": item.generator_id,
+                    "start_dt": item.start_dt,
+                    "end_dt": item.end_dt,
+                    "status": item.item_status,
+                    "remarks": item.remarks
+                }
+                for item in items
+            ]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching booking detail: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/bookings/{booking_id}/cancel")
+async def api_cancel_booking(
+    booking_id: str,
+    reason: str = Form(default="Cancelled via web"),
+    conn: sqlite3.Connection = Depends(get_db)
+):
+    """Cancel a booking."""
+    try:
+        service = BookingService(conn)
+        success, msg = service.cancel_booking(booking_id, reason)
+        
+        if not success:
+            raise HTTPException(status_code=400, detail=msg)
+        
+        return {"success": True, "message": msg}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error cancelling booking: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/export")
+async def api_export(conn: sqlite3.Connection = Depends(get_db)):
+    """Export data to CSV."""
+    try:
+        export_service = ExportService(conn)
+        bpath, ipath = export_service.export_to_csv()
+        return {
+            "success": True,
+            "bookings": bpath,
+            "items": ipath
+        }
+    except Exception as e:
+        logger.error(f"Error exporting data: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

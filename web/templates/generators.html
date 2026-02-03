@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1>⚙️ Generators</h1>
+    
+    {% if generators %}
+    <div class="filter-section" style="margin-bottom: 20px;">
+        <input type="text" id="generatorFilter" class="filter-input" placeholder="🔍 Search by ID, Type, or Status..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+    </div>
+    <table class="data-table" id="generatorTable">
+        <thead>
+            <tr>
+                <th>Generator ID</th>
+                <th>Capacity (kVA)</th>
+                <th>Type</th>
+                <th>Identification</th>
+                <th>Status</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for gen in generators %}
+            <tr>
+                <td><strong>{{ gen.generator_id }}</strong></td>
+                <td>{{ gen.capacity_kva }}</td>
+                <td>{{ gen.type or '-' }}</td>
+                <td>{{ gen.identification or '-' }}</td>
+                <td>
+                    <span class="badge" 
+                          style="background-color: {% if gen.status == 'Active' %}#4CAF50{% elif gen.status == 'Maintenance' %}#FFC107{% else %}#f44336{% endif %};">
+                        {{ gen.status }}
+                    </span>
+                </td>
+                <td>{{ gen.notes or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="info-box">
+        <p>No generators loaded. Please check the data files in the Data/ folder.</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+document.getElementById('generatorFilter')?.addEventListener('keyup', function() {
+    const filter = this.value.toUpperCase();
+    const table = document.getElementById('generatorTable');
+    if (!table) return;
+    const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+    
+    for (let i = 0; i < rows.length; i++) {
+        const text = rows[i].textContent.toUpperCase();
+        rows[i].style.display = text.includes(filter) ? '' : 'none';
+    }
+});
+</script>
+{% endblock %}
