@@ -5,18 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Generator Booking Ledger</title>
     <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    {% block head %}{% endblock %}
 </head>
 <body>
-    <nav class="navbar">
-        <div class="nav-container">
-            <div class="nav-brand">🔋 Generator Booking Ledger</div>
-            <ul class="nav-menu">
-                <li><a href="/">Dashboard</a></li>
-                <li><a href="/generators">Generators</a></li>
-                <li><a href="/vendors">Vendors</a></li>
-                <li><a href="/bookings">Bookings</a></li>
-                <li><a href="/create-booking" class="btn-primary">+ Create Booking</a></li>
-            </ul>
+    <nav class="sticky top-0 z-50 border-b border-slate-200/60 bg-slate-900/95 text-white shadow-sm backdrop-blur">
+        <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-4" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
+            <a href="/" class="flex items-center gap-3 text-lg font-semibold tracking-wide">
+                <span class="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-sm font-bold">G</span>
+                <span>Genset</span>
+            </a>
+            <div class="flex items-center">
+                <a href="#" class="flex items-center gap-2 rounded-full border border-white/20 px-3 py-1.5 text-sm font-medium text-white/90 transition hover:border-white/40 hover:text-white">
+                    <span class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">GS</span>
+                    Login
+                </a>
+            </div>
         </div>
     </nav>
     
