@@ -16,7 +16,8 @@ from .models import (
 from .repositories import (
     GeneratorRepository, VendorRepository, BookingRepository
 )
-from .utils import DateTimeParser, DATETIME_FORMAT
+from .utils import DateTimeParser, DATETIME_FORMAT, transaction
+from .validation import ensure_booking, ensure_generator, ensure_vendor
 from .database import DatabaseManager
 
 
@@ -39,6 +40,8 @@ class AvailabilityChecker:
         
         cur = self.conn.cursor()
         
+        confirmed = BookingStatus.CONFIRMED.value
+
         if exclude_booking_id:
             query = """
             SELECT bi.booking_id, bi.start_dt, bi.end_dt
@@ -46,20 +49,20 @@ class AvailabilityChecker:
             JOIN bookings b ON bi.booking_id = b.booking_id
             WHERE bi.generator_id = ?
               AND bi.booking_id != ?
-              AND bi.item_status = 'Confirmed' 
-              AND b.status = 'Confirmed'
+              AND bi.item_status = ?
+              AND b.status = ?
             """
-            cur.execute(query, (generator_id, exclude_booking_id))
+            cur.execute(query, (generator_id, exclude_booking_id, confirmed, confirmed))
         else:
             query = """
             SELECT bi.booking_id, bi.start_dt, bi.end_dt
             FROM booking_items bi
             JOIN bookings b ON bi.booking_id = b.booking_id
             WHERE bi.generator_id = ?
-              AND bi.item_status = 'Confirmed' 
-              AND b.status = 'Confirmed'
+              AND bi.item_status = ?
+              AND b.status = ?
             """
-            cur.execute(query, (generator_id,))
+            cur.execute(query, (generator_id, confirmed, confirmed))
         
         rows = cur.fetchall()
         
@@ -125,10 +128,11 @@ class BookingService:
         ensuring that failed bookings don't leave orphaned records.
         """
         # Validate vendor exists
-        vendor = self.vendor_repo.get_by_id(vendor_id)
-        if not vendor:
+        try:
+            ensure_vendor(self.vendor_repo, vendor_id)
+        except ValueError:
             self.logger.warning(f"Booking creation failed: Invalid vendor | context={{'vendor_id': '{vendor_id}'}}")
-            raise ValueError(f"Vendor '{vendor_id}' does not exist")
+            raise
         
         # FIRST: Extract dates from items to check for existing overlapping bookings
         item_dates = []
@@ -167,16 +171,17 @@ class BookingService:
             prepared_items = self._validate_items(items)
             
             # Save items to existing booking
-            for item_data in prepared_items:
-                booking_item = BookingItem(
-                    booking_id=existing_booking_id,
-                    generator_id=item_data["generator_id"],
-                    start_dt=item_data["start_dt"],
-                    end_dt=item_data["end_dt"],
-                    item_status=BookingStatus.CONFIRMED.value,
-                    remarks=item_data["remarks"]
-                )
-                self.booking_repo.save_item(booking_item)
+            with transaction(self.conn):
+                for item_data in prepared_items:
+                    booking_item = BookingItem(
+                        booking_id=existing_booking_id,
+                        generator_id=item_data["generator_id"],
+                        start_dt=item_data["start_dt"],
+                        end_dt=item_data["end_dt"],
+                        item_status=BookingStatus.CONFIRMED.value,
+                        remarks=item_data["remarks"]
+                    )
+                    self.booking_repo.save_item(booking_item, commit=False)
             
             self.logger.info(f"Booking merged successfully | context={{'booking_id': '{existing_booking_id}', 'items_added': {len(prepared_items)}}}")
             return existing_booking_id
@@ -197,26 +202,27 @@ class BookingService:
         prepared_items = self._validate_items(items)
         
         # SECOND: All items validated - now save to database
-        # Create booking
+        # Create booking and items in one transaction
         booking = Booking(
             booking_id=booking_id,
             vendor_id=vendor_id,
             created_at=datetime.now().strftime(DATETIME_FORMAT),
             status=BookingStatus.CONFIRMED.value
         )
-        self.booking_repo.save(booking)
-        
-        # Save all prepared items
-        for item_data in prepared_items:
-            booking_item = BookingItem(
-                booking_id=booking_id,
-                generator_id=item_data["generator_id"],
-                start_dt=item_data["start_dt"],
-                end_dt=item_data["end_dt"],
-                item_status=BookingStatus.CONFIRMED.value,
-                remarks=item_data["remarks"]
-            )
-            self.booking_repo.save_item(booking_item)
+        with transaction(self.conn):
+            self.booking_repo.save(booking, commit=False)
+            
+            # Save all prepared items
+            for item_data in prepared_items:
+                booking_item = BookingItem(
+                    booking_id=booking_id,
+                    generator_id=item_data["generator_id"],
+                    start_dt=item_data["start_dt"],
+                    end_dt=item_data["end_dt"],
+                    item_status=BookingStatus.CONFIRMED.value,
+                    remarks=item_data["remarks"]
+                )
+                self.booking_repo.save_item(booking_item, commit=False)
         
         self.logger.info(f"Booking created successfully | context={{'booking_id': '{booking_id}', 'items_saved': {len(prepared_items)}}}")
         return booking_id
@@ -266,9 +272,15 @@ class BookingService:
                 generator_id = available[0]
             else:
                 # Validate generator exists
-                if not self.generator_repo.get_by_id(generator_id):
+                try:
+                    ensure_generator(
+                        self.generator_repo,
+                        generator_id,
+                        message=f"Item {idx + 1}: Generator '{generator_id}' not found"
+                    )
+                except ValueError:
                     self.logger.warning(f"Item validation failed | context={{'generator_id': '{generator_id}', 'reason': 'not found'}}")
-                    raise ValueError(f"Item {idx + 1}: Generator '{generator_id}' not found")
+                    raise
                 
                 is_avail, conflict = self.availability.is_available(
                     generator_id, start_dt, end_dt
@@ -304,10 +316,11 @@ class BookingService:
             return False, "start_dt and end_dt are required"
         
         # Validate booking
-        booking = self.booking_repo.get_by_id(booking_id)
-        if not booking:
+        try:
+            booking = ensure_booking(self.booking_repo, booking_id)
+        except ValueError as e:
             self.logger.warning(f"Add generator failed | context={{'booking_id': '{booking_id}', 'reason': 'not found'}}")
-            return False, f"Booking '{booking_id}' not found"
+            return False, str(e)
         
         if booking.status == BookingStatus.CANCELLED.value:
             self.logger.warning(f"Add generator failed | context={{'booking_id': '{booking_id}', 'reason': 'cancelled booking'}}")
@@ -325,8 +338,10 @@ class BookingService:
                 return False, f"No available {capacity_kva} kVA generator"
             generator_id = available[0]
         else:
-            if not self.generator_repo.get_by_id(generator_id):
-                return False, f"Generator '{generator_id}' not found"
+            try:
+                ensure_generator(self.generator_repo, generator_id)
+            except ValueError as e:
+                return False, str(e)
             
             is_avail, conflict = self.availability.is_available(
                 generator_id, start_dt, end_dt
@@ -356,9 +371,10 @@ class BookingService:
     ) -> Tuple[bool, str]:
         """Modify booking times for all items."""
         self.logger.info(f"Modifying booking times | context={{'booking_id': '{booking_id}'}}")
-        booking = self.booking_repo.get_by_id(booking_id)
-        if not booking:
-            return False, f"Booking '{booking_id}' not found"
+        try:
+            booking = ensure_booking(self.booking_repo, booking_id)
+        except ValueError as e:
+            return False, str(e)
         
         if booking.status == BookingStatus.CANCELLED.value:
             return False, "Cannot modify cancelled booking"
@@ -390,13 +406,13 @@ class BookingService:
         
         # Update all items
         cur = self.conn.cursor()
-        cur.execute(
-            """UPDATE booking_items 
-               SET start_dt = ?, end_dt = ?
-               WHERE booking_id = ? AND item_status = 'Confirmed'""",
-            (new_start_dt, new_end_dt, booking_id)
-        )
-        self.conn.commit()
+        with transaction(self.conn):
+            cur.execute(
+                """UPDATE booking_items 
+                   SET start_dt = ?, end_dt = ?
+                   WHERE booking_id = ? AND item_status = ?""",
+                (new_start_dt, new_end_dt, booking_id, BookingStatus.CONFIRMED.value)
+            )
         self.logger.info(f"Booking times modified successfully | context={{'booking_id': '{booking_id}'}}")
         
         return True, "Updated successfully"
@@ -408,23 +424,24 @@ class BookingService:
     ) -> Tuple[bool, str]:
         """Cancel a booking."""
         self.logger.info(f"Cancelling booking | context={{'booking_id': '{booking_id}', 'reason': '{reason}'}}")
-        booking = self.booking_repo.get_by_id(booking_id)
-        if not booking:
+        try:
+            ensure_booking(self.booking_repo, booking_id)
+        except ValueError as e:
             self.logger.warning(f"Cancellation failed | context={{'booking_id': '{booking_id}', 'reason': 'not found'}}")
-            return False, f"Booking '{booking_id}' not found"
+            return False, str(e)
         
         cur = self.conn.cursor()
-        cur.execute(
-            "UPDATE bookings SET status = 'Cancelled' WHERE booking_id = ?",
-            (booking_id,)
-        )
-        cur.execute(
-            """UPDATE booking_items 
-               SET item_status = 'Cancelled', remarks = ? 
-               WHERE booking_id = ?""",
-            (reason, booking_id)
-        )
-        self.conn.commit()
+        with transaction(self.conn):
+            cur.execute(
+                "UPDATE bookings SET status = ? WHERE booking_id = ?",
+                (BookingStatus.CANCELLED.value, booking_id)
+            )
+            cur.execute(
+                """UPDATE booking_items 
+                   SET item_status = ?, remarks = ? 
+                   WHERE booking_id = ?""",
+                (BookingStatus.CANCELLED.value, reason, booking_id)
+            )
         self.logger.info(f"Booking cancelled | context={{'booking_id': '{booking_id}'}}")
         
         return True, "Cancelled successfully"

@@ -19,6 +19,19 @@ DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 APP_TITLE = "Generator Booking Ledger"
 APP_VERSION = "2.0.0"
 
+# Date/Time Configuration
+DATETIME_FORMAT = "%Y-%m-%d %H:%M"
+DEFAULT_TIME = "08:00"
+
+# Status Constants
+STATUS_CONFIRMED = "Confirmed"
+STATUS_CANCELLED = "Cancelled"
+STATUS_PENDING = "Pending"
+
+GEN_STATUS_ACTIVE = "Active"
+GEN_STATUS_INACTIVE = "Inactive"
+GEN_STATUS_MAINTENANCE = "Maintenance"
+
 
 def setup_logging():
     """Configures the application-wide logger to write to file and console."""

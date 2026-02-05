@@ -127,18 +127,6 @@
 let itemsToUpdate = {};
 let itemsToRemove = [];
 
-document.getElementById('itemFilter')?.addEventListener('keyup', function() {
-    const filter = this.value.toUpperCase();
-    const table = document.getElementById('itemTable');
-    if (!table) return;
-    const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
-    
-    for (let i = 0; i < rows.length; i++) {
-        const text = rows[i].textContent.toUpperCase();
-        rows[i].style.display = text.includes(filter) ? '' : 'none';
-    }
-});
-
 function removeItem(button) {
     const row = button.closest('tr');
     const itemId = row.getAttribute('data-item-id');

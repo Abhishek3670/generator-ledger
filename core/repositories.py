@@ -180,7 +180,7 @@ class BookingRepository:
             status=row[3]
         )
     
-    def save(self, booking: Booking) -> None:
+    def save(self, booking: Booking, commit: bool = True) -> None:
         try:
             cur = self.conn.cursor()
             cur.execute(
@@ -189,7 +189,8 @@ class BookingRepository:
                 VALUES (?, ?, ?, ?)""",
                 (booking.booking_id, booking.vendor_id, booking.created_at, booking.status)
             )
-            self.conn.commit()
+            if commit:
+                self.conn.commit()
             self.logger.info(f"Booking saved | context={{'booking_id': '{booking.booking_id}'}}")
         except sqlite3.Error:
             self.logger.error(f"Failed to save booking | context={{'booking_id': '{booking.booking_id}'}}", exc_info=True)
@@ -211,7 +212,7 @@ class BookingRepository:
             ))
         return items
     
-    def save_item(self, item: BookingItem) -> None:
+    def save_item(self, item: BookingItem, commit: bool = True) -> None:
         try:
             cur = self.conn.cursor()
             cur.execute(
@@ -220,7 +221,8 @@ class BookingRepository:
                 VALUES (?, ?, ?, ?, ?, ?)""",
                 (item.booking_id, item.generator_id, item.start_dt, item.end_dt, item.item_status, item.remarks)
             )
-            self.conn.commit()
+            if commit:
+                self.conn.commit()
         except sqlite3.Error:
             self.logger.error(f"Failed to save booking item | context={{'booking_id': '{item.booking_id}', 'gen_id': '{item.generator_id}'}}", exc_info=True)
             raise

@@ -6,6 +6,8 @@ import sqlite3
 import logging
 from typing import Optional
 
+from config import STATUS_CONFIRMED, GEN_STATUS_ACTIVE
+
 
 class DatabaseManager:
     """Manages database connections and schema initialization."""
@@ -43,13 +45,13 @@ class DatabaseManager:
         
         try:
             cur = self.conn.cursor()
-            cur.executescript("""
+            cur.executescript(f"""
             CREATE TABLE IF NOT EXISTS generators (
                 generator_id TEXT PRIMARY KEY,
                 capacity_kva INTEGER NOT NULL,
                 identification TEXT,
                 type TEXT,
-                status TEXT DEFAULT 'Active',
+                status TEXT DEFAULT '{GEN_STATUS_ACTIVE}',
                 notes TEXT
             );
             
@@ -64,7 +66,7 @@ class DatabaseManager:
                 booking_id TEXT PRIMARY KEY,
                 vendor_id TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                status TEXT DEFAULT 'Confirmed',
+                status TEXT DEFAULT '{STATUS_CONFIRMED}',
                 FOREIGN KEY(vendor_id) REFERENCES vendors(vendor_id)
             );
 
@@ -74,7 +76,7 @@ class DatabaseManager:
                 generator_id TEXT NOT NULL,
                 start_dt TEXT NOT NULL,
                 end_dt TEXT NOT NULL,
-                item_status TEXT DEFAULT 'Confirmed',
+                item_status TEXT DEFAULT '{STATUS_CONFIRMED}',
                 remarks TEXT,
                 FOREIGN KEY(booking_id) REFERENCES bookings(booking_id),
                 FOREIGN KEY(generator_id) REFERENCES generators(generator_id)

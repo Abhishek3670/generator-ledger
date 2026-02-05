@@ -6,19 +6,28 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+from config import (
+    STATUS_CONFIRMED,
+    STATUS_CANCELLED,
+    STATUS_PENDING,
+    GEN_STATUS_ACTIVE,
+    GEN_STATUS_INACTIVE,
+    GEN_STATUS_MAINTENANCE,
+)
+
 
 class BookingStatus(Enum):
     """Booking status enumeration."""
-    CONFIRMED = "Confirmed"
-    CANCELLED = "Cancelled"
-    PENDING = "Pending"
+    CONFIRMED = STATUS_CONFIRMED
+    CANCELLED = STATUS_CANCELLED
+    PENDING = STATUS_PENDING
 
 
 class GeneratorStatus(Enum):
     """Generator status enumeration."""
-    ACTIVE = "Active"
-    INACTIVE = "Inactive"
-    MAINTENANCE = "Maintenance"
+    ACTIVE = GEN_STATUS_ACTIVE
+    INACTIVE = GEN_STATUS_INACTIVE
+    MAINTENANCE = GEN_STATUS_MAINTENANCE
 
 
 @dataclass

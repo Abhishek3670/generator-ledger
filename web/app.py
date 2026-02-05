@@ -22,10 +22,22 @@ from core import (
     VendorRepository,
     BookingRepository,
 )
+from core.utils import transaction
+from core.validation import ensure_booking
 from core.services import create_vendor, archive_all_bookings
 
 # Initialize logging
-from config import setup_logging, DB_PATH, HOST, PORT, DEBUG, APP_TITLE, APP_VERSION
+from config import (
+    setup_logging,
+    DB_PATH,
+    HOST,
+    PORT,
+    DEBUG,
+    APP_TITLE,
+    APP_VERSION,
+    STATUS_CONFIRMED,
+    GEN_STATUS_ACTIVE,
+)
 setup_logging()
 
 logger = logging.getLogger(__name__)
@@ -106,6 +118,30 @@ def shutdown_app():
     logger.info("FastAPI application shutdown")
 
 
+def _summarize_booking_items(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Summarize booking items for logging without full payloads."""
+    dates = []
+    generator_ids = []
+    capacities = []
+    for item in items:
+        date_val = item.get("date") or item.get("start_dt")
+        if date_val:
+            dates.append(date_val)
+        if item.get("generator_id"):
+            generator_ids.append(item.get("generator_id"))
+        if item.get("capacity_kva") is not None:
+            capacities.append(item.get("capacity_kva"))
+
+    sample_limit = 3
+    return {
+        "item_count": len(items),
+        "date_samples": dates[:sample_limit],
+        "generator_samples": generator_ids[:sample_limit],
+        "capacity_samples": capacities[:sample_limit],
+        "truncated": len(items) > sample_limit,
+    }
+
+
 @app.on_event("startup")
 async def startup():
     initialize_app()
@@ -157,8 +193,8 @@ async def index(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         vendors = vendor_repo.get_all()
         
         # Count confirmed bookings and generators
-        confirmed_bookings = len([b for b in bookings if b.status == "Confirmed"])
-        active_generators = len([g for g in generators if g.status == "Active"])
+        confirmed_bookings = len([b for b in bookings if b.status == STATUS_CONFIRMED])
+        active_generators = len([g for g in generators if g.status == GEN_STATUS_ACTIVE])
         total_vendors = len(vendors)
         
         return templates.TemplateResponse("index.html", {
@@ -290,11 +326,16 @@ async def booking_detail_page(request: Request, booking_id: str, conn: sqlite3.C
         vendor_repo = VendorRepository(conn)
         gen_repo = GeneratorRepository(conn)
         
-        booking = booking_repo.get_by_id(booking_id)
-        if not booking:
+        try:
+            booking = ensure_booking(
+                booking_repo,
+                booking_id,
+                message=f"Booking '{booking_id}' not found"
+            )
+        except ValueError as e:
             return templates.TemplateResponse("error.html", {
                 "request": request,
-                "error": f"Booking '{booking_id}' not found"
+                "error": str(e)
             })
         
         vendor = vendor_repo.get_by_id(booking.vendor_id)
@@ -328,11 +369,16 @@ async def edit_booking_page(request: Request, booking_id: str, conn: sqlite3.Con
         vendor_repo = VendorRepository(conn)
         gen_repo = GeneratorRepository(conn)
         
-        booking = booking_repo.get_by_id(booking_id)
-        if not booking:
+        try:
+            booking = ensure_booking(
+                booking_repo,
+                booking_id,
+                message=f"Booking '{booking_id}' not found"
+            )
+        except ValueError as e:
             return templates.TemplateResponse("error.html", {
                 "request": request,
-                "error": f"Booking '{booking_id}' not found"
+                "error": str(e)
             })
         
         vendor = vendor_repo.get_by_id(booking.vendor_id)
@@ -480,7 +526,9 @@ async def api_create_booking(
         vendor_id = request_data.vendor_id
         items = [item.dict() for item in request_data.items]
         
-        logger.info(f"API booking request | context={{'vendor_id': '{vendor_id}', 'item_count': {len(items)}, 'items': {items}}}")
+        item_summary = _summarize_booking_items(items)
+        item_summary["vendor_id"] = vendor_id
+        logger.info(f"API booking request | context={item_summary}")
         
         if not vendor_id:
             raise HTTPException(status_code=400, detail="vendor_id is required")
@@ -522,10 +570,10 @@ async def api_booking_detail(booking_id: str, conn: sqlite3.Connection = Depends
     """Get booking detail."""
     try:
         booking_repo = BookingRepository(conn)
-        booking = booking_repo.get_by_id(booking_id)
-        
-        if not booking:
-            raise HTTPException(status_code=404, detail="Booking not found")
+        try:
+            booking = ensure_booking(booking_repo, booking_id, message="Booking not found")
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
         
         items = booking_repo.get_items(booking_id)
         
@@ -585,21 +633,21 @@ async def api_delete_booking(
     """Delete a booking completely."""
     try:
         booking_repo = BookingRepository(conn)
-        booking = booking_repo.get_by_id(booking_id)
-        
-        if not booking:
-            raise HTTPException(status_code=404, detail="Booking not found")
+        try:
+            ensure_booking(booking_repo, booking_id, message="Booking not found")
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
         
         # Delete all booking items first
         items = booking_repo.get_items(booking_id)
         cur = conn.cursor()
         
-        for item in items:
-            cur.execute("DELETE FROM booking_items WHERE id = ?", (item.id,))
-        
-        # Delete the booking
-        cur.execute("DELETE FROM bookings WHERE booking_id = ?", (booking_id,))
-        conn.commit()
+        with transaction(conn):
+            for item in items:
+                cur.execute("DELETE FROM booking_items WHERE id = ?", (item.id,))
+            
+            # Delete the booking
+            cur.execute("DELETE FROM bookings WHERE booking_id = ?", (booking_id,))
         
         logger.info(f"Booking deleted | context={{'booking_id': '{booking_id}'}}")
         return {"success": True, "message": f"Booking {booking_id} deleted successfully"}
@@ -622,10 +670,10 @@ async def api_add_booking_item(
     """Add a new generator to an existing booking."""
     try:
         booking_repo = BookingRepository(conn)
-        booking = booking_repo.get_by_id(booking_id)
-        
-        if not booking:
-            raise HTTPException(status_code=404, detail="Booking not found")
+        try:
+            ensure_booking(booking_repo, booking_id, message="Booking not found")
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
         
         service = BookingService(conn)
         # Add generator to booking
@@ -654,10 +702,10 @@ async def api_bulk_update_items(
     """Update multiple booking items and remove items."""
     try:
         booking_repo = BookingRepository(conn)
-        booking = booking_repo.get_by_id(booking_id)
-        
-        if not booking:
-            raise HTTPException(status_code=404, detail="Booking not found")
+        try:
+            ensure_booking(booking_repo, booking_id, message="Booking not found")
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
         
         cur = conn.cursor()
         
@@ -665,17 +713,16 @@ async def api_bulk_update_items(
         updates = request_data.get("updates", [])
         removes = request_data.get("removes", [])
         
-        for update in updates:
-            cur.execute(
-                "UPDATE booking_items SET start_dt = ?, end_dt = ?, remarks = ? WHERE id = ?",
-                (update["start_dt"], update["end_dt"], update["remarks"], update["id"])
-            )
-        
-        # Remove items
-        for item_id in removes:
-            cur.execute("DELETE FROM booking_items WHERE id = ?", (item_id,))
-        
-        conn.commit()
+        with transaction(conn):
+            for update in updates:
+                cur.execute(
+                    "UPDATE booking_items SET start_dt = ?, end_dt = ?, remarks = ? WHERE id = ?",
+                    (update["start_dt"], update["end_dt"], update["remarks"], update["id"])
+                )
+            
+            # Remove items
+            for item_id in removes:
+                cur.execute("DELETE FROM booking_items WHERE id = ?", (item_id,))
         
         logger.info(f"Booking items updated | context={{'booking_id': '{booking_id}', 'updates': {len(updates)}, 'removes': {len(removes)}}}")
         return {"success": True, "message": "Items updated successfully"}

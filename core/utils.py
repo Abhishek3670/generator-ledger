@@ -3,11 +3,11 @@ Utility functions and helpers for the Generator Booking Ledger system.
 """
 
 import logging
+from contextlib import contextmanager
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Iterator
 
-DATETIME_FORMAT = "%Y-%m-%d %H:%M"
-DEFAULT_TIME = "08:00"
+from config import DATETIME_FORMAT, DEFAULT_TIME
 
 
 class DateTimeParser:
@@ -89,3 +89,15 @@ class DateTimeParser:
         e2 = datetime.strptime(end2, DATETIME_FORMAT)
         
         return s1 < e2 and e1 > s2
+
+
+@contextmanager
+def transaction(conn) -> Iterator[None]:
+    """Run a block inside a DB transaction (commit or rollback)."""
+    try:
+        conn.execute("BEGIN")
+        yield
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
