@@ -124,6 +124,26 @@
     </div>
 </div>
 
+<div id="bookingOverlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
+    <div class="w-full max-w-3xl rounded-2xl bg-white shadow-xl">
+        <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Booking Created</div>
+                <div id="overlayBookingId" class="mt-1 text-lg font-semibold text-slate-900"></div>
+                <div id="overlayBookingMessage" class="mt-1 text-xs text-slate-500"></div>
+            </div>
+            <button id="closeBookingOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                Close
+            </button>
+        </div>
+        <div id="overlayBookingContent" class="space-y-4 px-6 py-4"></div>
+        <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 px-6 py-4">
+            <a id="overlayViewDetails" href="#" class="rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800">View Details</a>
+            <button id="overlayDone" type="button" class="rounded-full border border-slate-200 px-5 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">Done</button>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -141,6 +161,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const vendorDropdown = document.getElementById('vendorDropdown');
     const vendorDropdownList = document.getElementById('vendorDropdownList');
     const vendorDropdownEmpty = document.getElementById('vendorDropdownEmpty');
+    const bookingOverlay = document.getElementById('bookingOverlay');
+    const overlayBookingId = document.getElementById('overlayBookingId');
+    const overlayBookingMessage = document.getElementById('overlayBookingMessage');
+    const overlayBookingContent = document.getElementById('overlayBookingContent');
+    const overlayViewDetails = document.getElementById('overlayViewDetails');
+    const closeBookingOverlay = document.getElementById('closeBookingOverlay');
+    const overlayDone = document.getElementById('overlayDone');
 
     function setCapacityButtonState(button, selected) {
         button.classList.remove(...capacitySelectedClasses, ...capacityUnselectedClasses);
@@ -153,6 +180,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function normalizeVendorValue(value) {
         return value.trim().toLowerCase();
+    }
+
+    function getVendorNameById(id) {
+        const match = vendors.find(v => v.id === id);
+        return match ? match.name : id;
     }
 
     function resolveVendorId(value) {
@@ -213,6 +245,56 @@ document.addEventListener('DOMContentLoaded', function() {
     function hideVendorDropdown() {
         if (!vendorDropdown) return;
         vendorDropdown.classList.add('hidden');
+    }
+
+    function hideBookingOverlay() {
+        if (!bookingOverlay) return;
+        bookingOverlay.classList.add('hidden');
+        bookingOverlay.classList.remove('flex');
+        window.location.reload();
+    }
+
+    function showBookingOverlay(payload) {
+        if (!bookingOverlay || !overlayBookingContent) return;
+        overlayBookingContent.innerHTML = '';
+        overlayBookingId.textContent = payload.bookingId || '';
+        overlayBookingMessage.textContent = payload.message || 'Booking saved successfully.';
+
+        const summary = document.createElement('div');
+        summary.className = 'rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700';
+        summary.innerHTML = `
+            <div class="flex flex-wrap gap-4 text-xs uppercase tracking-[0.2em] text-slate-500">
+                <span>Vendor</span>
+                <span>Dates</span>
+                <span>Items</span>
+            </div>
+            <div class="mt-2 flex flex-wrap gap-4 text-sm font-semibold text-slate-900">
+                <span>${payload.vendorName || '-'}</span>
+                <span>${payload.dateCount || 0}</span>
+                <span>${payload.itemCount || 0}</span>
+            </div>
+        `;
+        overlayBookingContent.appendChild(summary);
+
+        if (payload.items && payload.items.length > 0) {
+            const list = document.createElement('div');
+            list.className = 'space-y-2';
+            payload.items.forEach(item => {
+                const dateOnly = item.start_dt ? item.start_dt.split(' ')[0] : '';
+                const row = document.createElement('div');
+                row.className = 'rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700';
+                row.textContent = `${item.generator_id}${dateOnly ? ` | ${dateOnly}` : ''}${item.remarks ? ` | ${item.remarks}` : ''}`;
+                list.appendChild(row);
+            });
+            overlayBookingContent.appendChild(list);
+        }
+
+        if (overlayViewDetails) {
+            overlayViewDetails.href = `/booking/${payload.bookingId}`;
+        }
+
+        bookingOverlay.classList.remove('hidden');
+        bookingOverlay.classList.add('flex');
     }
 
     if (vendorSearchInput) {
@@ -375,8 +457,31 @@ document.addEventListener('DOMContentLoaded', function() {
                 const data = await response.json();
 
                 if (response.ok) {
-                    alert(`Booking created successfully!\nBooking ID: ${data.booking_id}\nDates: ${dates.length}`);
-                    window.location.href = `/booking/${data.booking_id}`;
+                    let detail = null;
+                    try {
+                        const detailResponse = await fetch(`/api/bookings/${data.booking_id}`);
+                        if (detailResponse.ok) {
+                            detail = await detailResponse.json();
+                        }
+                    } catch (detailError) {
+                        console.warn('Unable to load booking detail', detailError);
+                    }
+
+                    const vendorName = getVendorNameById(vendorId);
+                    const detailItems = detail && detail.items ? detail.items : [];
+                    const derivedDates = detailItems.length
+                        ? Array.from(new Set(detailItems.map(item => item.start_dt.split(' ')[0]))).sort()
+                        : dates;
+
+                    showBookingOverlay({
+                        bookingId: data.booking_id,
+                        message: data.message || 'Booking saved successfully.',
+                        vendorName: vendorName,
+                        dateCount: derivedDates.length,
+                        itemCount: detailItems.length || dates.length,
+                        dates: derivedDates,
+                        items: detailItems
+                    });
                 } else {
                     const errorMsg = data.detail || 'Unknown error occurred';
                     alert('❌ Error creating booking:\n\n' + errorMsg);
@@ -385,6 +490,22 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (error) {
                 alert('❌ Error: ' + error.message);
                 console.error(error);
+            }
+        });
+    }
+
+    if (closeBookingOverlay) {
+        closeBookingOverlay.addEventListener('click', hideBookingOverlay);
+    }
+
+    if (overlayDone) {
+        overlayDone.addEventListener('click', hideBookingOverlay);
+    }
+
+    if (bookingOverlay) {
+        bookingOverlay.addEventListener('click', function(event) {
+            if (event.target === bookingOverlay) {
+                hideBookingOverlay();
             }
         });
     }
