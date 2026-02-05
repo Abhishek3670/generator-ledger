@@ -137,9 +137,14 @@
                 <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Bookings</div>
                 <div id="overlayDate" class="mt-1 text-lg font-semibold text-slate-900"></div>
             </div>
-            <button id="closeOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
-                Close
-            </button>
+            <div class="flex items-center gap-2">
+                <button id="downloadOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                    Download
+                </button>
+                <button id="closeOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                    Close
+                </button>
+            </div>
         </div>
         <div id="overlayContent" class="max-h-[70vh] space-y-4 overflow-y-auto px-6 py-4"></div>
     </div>
@@ -152,6 +157,8 @@
         const overlayDate = document.getElementById('overlayDate');
         const overlayContent = document.getElementById('overlayContent');
         const closeOverlay = document.getElementById('closeOverlay');
+        const downloadOverlay = document.getElementById('downloadOverlay');
+        let overlayData = null;
         if (!calendarEl) return;
 
         const calendar = new FullCalendar.Calendar(calendarEl, {
@@ -169,6 +176,7 @@
                 fetch(`/api/calendar/day?date=${dateValue}`)
                     .then(response => response.json())
                     .then(data => {
+                        overlayData = data;
                         overlayDate.textContent = data.date;
                         overlayContent.innerHTML = '';
 
@@ -217,6 +225,7 @@
                         overlay.classList.add('flex');
                     })
                     .catch(() => {
+                        overlayData = null;
                         overlayContent.innerHTML = '<div class="text-sm text-slate-500">Unable to load bookings for this date.</div>';
                         overlay.classList.remove('hidden');
                         overlay.classList.add('flex');
@@ -230,6 +239,43 @@
             closeOverlay.addEventListener('click', function () {
                 overlay.classList.add('hidden');
                 overlay.classList.remove('flex');
+            });
+        }
+
+        if (downloadOverlay) {
+            downloadOverlay.addEventListener('click', function () {
+                if (!overlayData) return;
+                const lines = [];
+                lines.push(`Date: ${overlayData.date || ''}`);
+                if (!overlayData.vendors || overlayData.vendors.length === 0) {
+                    lines.push('No confirmed bookings.');
+                } else {
+                    overlayData.vendors.forEach(vendor => {
+                        const capacities = [];
+                        vendor.bookings.forEach(booking => {
+                            booking.items.forEach(item => {
+                                let capacityValue = item.capacity_kva;
+                                if (!capacityValue && item.generator_id) {
+                                    const match = item.generator_id.match(/(\\d+)\\s*KVA/i);
+                                    if (match) {
+                                        capacityValue = match[1];
+                                    }
+                                }
+                                capacities.push(capacityValue ? `${capacityValue} kVA` : item.generator_id);
+                            });
+                        });
+                        lines.push(`${vendor.vendor_name}: ${capacities.join(' + ')}`);
+                    });
+                }
+                const blob = new Blob([lines.join('\\n')], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `bookings_${overlayData.date || 'date'}.txt`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
             });
         }
 
