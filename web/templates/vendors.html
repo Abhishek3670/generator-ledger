@@ -1,85 +1,162 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="container">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>👥 Vendors</h1>
-        <button class="btn-primary" onclick="openAddVendorModal()" style="padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">➕ Add New Vendor</button>
+<div class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100">
+    <div class="mx-auto max-w-6xl px-4 py-10 lg:py-12" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Directory</div>
+                <h1 class="mt-2 text-2xl font-semibold text-slate-900">Vendors</h1>
+                <p class="mt-1 text-sm text-slate-500">Manage partners and contact details.</p>
+            </div>
+            <button
+                class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                onclick="openAddVendorModal()"
+            >
+                + Add New Vendor
+            </button>
+        </div>
+
+        {% if vendors %}
+        <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <input
+                type="text"
+                id="vendorFilter"
+                placeholder="Search by Vendor ID, Name, or Location"
+                class="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+            >
+        </div>
+
+        <div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                        <tr>
+                            <th class="px-6 py-4 text-left font-semibold">Vendor ID</th>
+                            <th class="px-6 py-4 text-left font-semibold">Name</th>
+                            <th class="px-6 py-4 text-left font-semibold">Location</th>
+                            <th class="px-6 py-4 text-left font-semibold">Phone</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 text-slate-700" id="vendorTable">
+                        {% for vendor in vendors %}
+                        <tr class="transition hover:bg-slate-50">
+                            <td class="px-6 py-4 font-semibold text-slate-900">{{ vendor.vendor_id }}</td>
+                            <td class="px-6 py-4">{{ vendor.vendor_name }}</td>
+                            <td class="px-6 py-4">{{ vendor.vendor_place or '-' }}</td>
+                            <td class="px-6 py-4">{{ vendor.phone or '-' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% else %}
+        <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
+            No vendors loaded. Please check the data files in the Data/ folder.
+        </div>
+        {% endif %}
     </div>
-    
-    {% if vendors %}
-    <div class="filter-section" style="margin-bottom: 20px;">
-        <input type="text" id="vendorFilter" class="filter-input" placeholder="🔍 Search by Vendor ID, Name, or Place..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+</div>
+
+<div id="addVendorModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
+    <div class="w-full max-w-lg rounded-2xl bg-white shadow-xl">
+        <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">New Vendor</div>
+                <h2 class="mt-1 text-lg font-semibold text-slate-900">Add Vendor</h2>
+            </div>
+            <button class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900" onclick="closeAddVendorModal()">
+                Close
+            </button>
+        </div>
+        <form id="addVendorForm" onsubmit="submitAddVendor(event)" class="space-y-4 px-6 py-5">
+            <div>
+                <label for="vendorName" class="text-sm font-semibold text-slate-700">Vendor Name <span class="text-rose-500">*</span></label>
+                <input
+                    type="text"
+                    id="vendorName"
+                    placeholder="e.g., ABC Generators"
+                    required
+                    class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                >
+            </div>
+            <div>
+                <label for="vendorPlace" class="text-sm font-semibold text-slate-700">Location</label>
+                <input
+                    type="text"
+                    id="vendorPlace"
+                    placeholder="Default: Civil Line"
+                    value="Civil Line"
+                    class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                >
+            </div>
+            <div>
+                <label for="vendorPhone" class="text-sm font-semibold text-slate-700">Phone</label>
+                <input
+                    type="tel"
+                    id="vendorPhone"
+                    placeholder="e.g., +1-555-0123"
+                    class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                >
+            </div>
+            <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
+                <button type="button" onclick="closeAddVendorModal()" class="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                    Cancel
+                </button>
+                <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">
+                    Create Vendor
+                </button>
+            </div>
+        </form>
     </div>
-    <table class="data-table" id="vendorTable">
-        <thead>
-            <tr>
-                <th>Vendor ID</th>
-                <th>Name</th>
-                <th>Location</th>
-                <th>Phone</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for vendor in vendors %}
-            <tr>
-                <td><strong>{{ vendor.vendor_id }}</strong></td>
-                <td>{{ vendor.vendor_name }}</td>
-                <td>{{ vendor.vendor_place or '-' }}</td>
-                <td>{{ vendor.phone or '-' }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="info-box">
-        <p>No vendors loaded. Please check the data files in the Data/ folder.</p>
-    </div>
-    {% endif %}
 </div>
 
 <script>
 document.getElementById('vendorFilter')?.addEventListener('keyup', function() {
     const filter = this.value.toUpperCase();
-    const table = document.getElementById('vendorTable');
-    if (!table) return;
-    const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
-    
+    const tableBody = document.getElementById('vendorTable');
+    if (!tableBody) return;
+    const rows = tableBody.getElementsByTagName('tr');
+
     for (let i = 0; i < rows.length; i++) {
         const text = rows[i].textContent.toUpperCase();
         rows[i].style.display = text.includes(filter) ? '' : 'none';
     }
 });
 
-// Modal functions
 function openAddVendorModal() {
-    document.getElementById('addVendorModal').style.display = 'block';
+    const modal = document.getElementById('addVendorModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
 }
 
 function closeAddVendorModal() {
-    document.getElementById('addVendorModal').style.display = 'none';
+    const modal = document.getElementById('addVendorModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
     document.getElementById('addVendorForm').reset();
 }
 
-window.onclick = function(event) {
+window.addEventListener('click', function(event) {
     const modal = document.getElementById('addVendorModal');
     if (event.target === modal) {
-        modal.style.display = 'none';
+        closeAddVendorModal();
     }
-}
+});
 
 async function submitAddVendor(e) {
     e.preventDefault();
-    
+
     const vendor_name = document.getElementById('vendorName').value.trim();
     const vendor_place = document.getElementById('vendorPlace').value.trim() || 'Civil Line';
     const phone = document.getElementById('vendorPhone').value.trim();
-    
+
     if (!vendor_name) {
         alert('❌ Vendor Name is required');
         return;
     }
-    
+
     try {
         const response = await fetch('/api/vendors', {
             method: 'POST',
@@ -92,9 +169,9 @@ async function submitAddVendor(e) {
                 phone
             })
         });
-        
+
         const data = await response.json();
-        
+
         if (response.ok) {
             alert(`✓ Vendor created successfully!\n\nVendor ID: ${data.vendor_id}`);
             closeAddVendorModal();
@@ -110,36 +187,4 @@ async function submitAddVendor(e) {
     }
 }
 </script>
-
-<!-- Modal for Adding New Vendor -->
-<div id="addVendorModal" class="modal" style="display: none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.4);">
-    <div class="modal-content" style="background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; border-radius: 8px; width: 90%; max-width: 500px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h2 style="margin: 0;">➕ Add New Vendor</h2>
-            <span class="close" onclick="closeAddVendorModal()" style="cursor: pointer; font-size: 28px; font-weight: bold;">&times;</span>
-        </div>
-        
-        <form id="addVendorForm" onsubmit="submitAddVendor(event)">
-            <div style="margin-bottom: 15px;">
-                <label for="vendorName" style="display: block; margin-bottom: 5px; font-weight: bold;">Vendor Name <span style="color: red;">*</span></label>
-                <input type="text" id="vendorName" placeholder="e.g., ABC Generators" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
-            </div>
-            
-            <div style="margin-bottom: 15px;">
-                <label for="vendorPlace" style="display: block; margin-bottom: 5px; font-weight: bold;">Location</label>
-                <input type="text" id="vendorPlace" placeholder="Default: Civil Line" value="Civil Line" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
-            </div>
-            
-            <div style="margin-bottom: 20px;">
-                <label for="vendorPhone" style="display: block; margin-bottom: 5px; font-weight: bold;">Phone</label>
-                <input type="tel" id="vendorPhone" placeholder="e.g., +1-555-0123" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
-            </div>
-            
-            <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button type="button" onclick="closeAddVendorModal()" style="padding: 10px 20px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
-                <button type="submit" style="padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">Create Vendor</button>
-            </div>
-        </form>
-    </div>
-</div>
 {% endblock %}

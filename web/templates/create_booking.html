@@ -1,44 +1,79 @@
 {% extends "base.html" %}
 
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<style>
+    .flatpickr-calendar {
+        box-shadow: none;
+        border: none;
+        width: 100%;
+    }
+    .flatpickr-day.selected,
+    .flatpickr-day.startRange,
+    .flatpickr-day.endRange,
+    .flatpickr-day.selected.inRange,
+    .flatpickr-day.startRange.inRange,
+    .flatpickr-day.endRange.inRange {
+        background: #0f172a;
+        border-color: #0f172a;
+        color: #ffffff;
+    }
+    .flatpickr-day.today {
+        border-color: #94a3b8;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="container">
-    <h1>➕ Create New Booking</h1>
-    
-    <form id="bookingForm" class="form">
-        <fieldset>
-            <legend>Booking Details</legend>
-            
-            <div class="form-group">
-                <label for="vendor_id">Vendor *</label>
-                <select id="vendor_id" name="vendor_id" required>
-                    <option value="">-- Select Vendor --</option>
-                    {% for vendor in vendors %}
-                    <option value="{{ vendor.vendor_id }}">
-                        {{ vendor.vendor_id }} - {{ vendor.vendor_name }}
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-        </fieldset>
-        
-        <fieldset>
-            <legend>Generator Assignment</legend>
-            
-            <div class="form-group">
-                <label>
-                    <input type="radio" name="assign_method" value="generator">
-                    Assign by Generator ID
-                </label>
-                <label>
-                    <input type="radio" name="assign_method" value="capacity" checked>
-                    Assign by Capacity (Auto-assign)
-                </label>
-            </div>
-            
-            <div id="generator-method" style="display: none;">
-                <div class="form-group">
-                    <label for="generator_id">Generator</label>
-                    <select id="generator_id" name="generator_id">
+<div class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100">
+    <div class="mx-auto max-w-6xl px-4 py-10 lg:py-12" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
+        <div>
+            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Bookings</div>
+            <h1 class="mt-2 text-2xl font-semibold text-slate-900">Create Booking</h1>
+            <p class="mt-1 text-sm text-slate-500">Reserve generators by date with auto-assignment or manual selection.</p>
+        </div>
+
+        <form id="bookingForm" class="mt-6 space-y-6">
+            <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Booking Details</div>
+                <div class="mt-4">
+                    <label for="vendor_search" class="text-sm font-semibold text-slate-700">Vendor <span class="text-rose-500">*</span></label>
+                    <div class="relative">
+                        <input
+                            id="vendor_search"
+                            name="vendor_search"
+                            placeholder="Search by vendor name or ID"
+                            class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                            autocomplete="off"
+                            required
+                        >
+                        <div id="vendorDropdown" class="absolute z-20 mt-2 hidden w-full rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Vendors</div>
+                            <div id="vendorDropdownList" class="mt-2 max-h-60 space-y-1 overflow-y-auto"></div>
+                            <div id="vendorDropdownEmpty" class="mt-2 hidden text-xs text-slate-500">No matches found.</div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="vendor_id" name="vendor_id" value="">
+                    <p class="mt-2 text-xs text-slate-500">Start typing a vendor name or ID to autocomplete.</p>
+                </div>
+            </section>
+
+            <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Generator Assignment</div>
+                <div class="mt-4 flex flex-wrap gap-3">
+                    <label data-assign-option class="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm transition hover:border-slate-300 sm:w-auto">
+                        <input type="radio" name="assign_method" value="generator" class="sr-only">
+                        Assign by Generator ID
+                    </label>
+                    <label data-assign-option class="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm transition hover:border-slate-300 sm:w-auto">
+                        <input type="radio" name="assign_method" value="capacity" checked class="sr-only">
+                        Assign by Capacity (Auto-assign)
+                    </label>
+                </div>
+
+                <div id="generator-method" class="mt-4 hidden">
+                    <label for="generator_id" class="text-sm font-semibold text-slate-700">Generator</label>
+                    <select id="generator_id" name="generator_id" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
                         <option value="">-- Select Generator --</option>
                         {% for gen in generators %}
                         <option value="{{ gen.generator_id }}">
@@ -47,171 +82,256 @@
                         {% endfor %}
                     </select>
                 </div>
-            </div>
-            
-            <div id="capacity-method" style="display: block;">
-                <div class="form-group">
-                    <label>Capacity (kVA)</label>
-                    <div id="capacity-buttons" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
+
+                <div id="capacity-method" class="mt-4">
+                    <div class="text-sm font-semibold text-slate-700">Capacity (kVA)</div>
+                    <div id="capacity-buttons" class="mt-3 flex flex-wrap gap-3">
                         {% for cap in capacities %}
-                        <button type="button" class="capacity-btn" data-capacity="{{ cap }}" style="padding: 10px 16px; border: 2px solid #ddd; background: white; color: #333; border-radius: 4px; cursor: pointer; font-weight: 500;">{{ cap }} kVA</button>
+                        <button type="button" class="capacity-btn rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300" data-capacity="{{ cap }}">
+                            {{ cap }} kVA
+                        </button>
                         {% endfor %}
                     </div>
                     <input type="hidden" id="capacity_kva" name="capacity_kva" value="">
+                    <p class="mt-3 text-xs text-slate-500">Auto-assign picks the first available generator of the selected capacity.</p>
                 </div>
-            </div>
-            
-            <div class="form-group">
-                <label>📅 Booking Dates *</label>
-                <div id="dates-container" style="border: 1px solid #ddd; padding: 10px; border-radius: 4px;">
-                    <div class="date-item" style="display: flex; gap: 10px; margin-bottom: 10px; align-items: center;">
-                        <input type="date" class="booking-date" required style="flex: 1;">
-                        <button type="button" class="btn-remove-date" style="padding: 5px 10px; background: #ccc; color: #666; border: none; border-radius: 4px; cursor: not-allowed;" disabled title="At least one date is required">Remove</button>
+            </section>
+
+            <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Booking Dates</div>
+                <div class="mt-4 grid gap-4 lg:grid-cols-[320px_1fr]">
+                    <div class="rounded-xl border border-slate-200 p-3 shadow-sm">
+                        <input id="bookingDates" type="text" class="sr-only" aria-label="Booking dates">
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div class="text-sm font-semibold text-slate-700">Selected dates</div>
+                        <div id="selectedDates" class="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">No dates selected.</div>
                     </div>
                 </div>
-                <button type="button" id="add-date-btn" style="margin-top: 10px; padding: 8px 16px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;">+ Add Date</button>
+            </section>
+
+            <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Remarks</div>
+                <label for="remarks" class="mt-3 block text-sm font-semibold text-slate-700">Optional Notes</label>
+                <textarea id="remarks" name="remarks" rows="3" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200" placeholder="Add any notes for this booking..."></textarea>
+            </section>
+
+            <div class="flex flex-wrap items-center gap-3">
+                <button type="submit" class="rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">Create Booking</button>
+                <a href="/bookings" class="rounded-full border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">Cancel</a>
             </div>
-            
-            <div class="form-group">
-                <label for="remarks">Remarks (optional)</label>
-                <textarea id="remarks" name="remarks" rows="3"></textarea>
-            </div>
-        </fieldset>
-        
-        <div class="form-actions">
-            <button type="submit" class="btn-primary">Create Booking</button>
-            <a href="/bookings" class="btn-secondary">Cancel</a>
-        </div>
-    </form>
+        </form>
+    </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Function to update remove button states
-    function updateRemoveButtons() {
-        const dateItems = document.querySelectorAll('.date-item');
-        dateItems.forEach((item, index) => {
-            const removeBtn = item.querySelector('.btn-remove-date');
-            if (dateItems.length === 1) {
-                // Disable the remove button if it's the only date
-                removeBtn.disabled = true;
-                removeBtn.style.background = '#ccc';
-                removeBtn.style.color = '#666';
-                removeBtn.style.cursor = 'not-allowed';
-                removeBtn.title = 'At least one date is required';
+    const capacitySelectedClasses = ['border-slate-900', 'bg-slate-900', 'text-white'];
+    const capacityUnselectedClasses = ['border-slate-200', 'bg-white', 'text-slate-700'];
+    const assignSelectedClasses = ['border-slate-900', 'bg-slate-900', 'text-white'];
+    const assignUnselectedClasses = ['border-slate-200', 'text-slate-700', 'bg-white'];
+    const vendors = [
+        {% for vendor in vendors %}
+        { id: "{{ vendor.vendor_id }}", name: "{{ vendor.vendor_name | replace('\"', '\\\"') }}" },
+        {% endfor %}
+    ];
+    const vendorSearchInput = document.getElementById('vendor_search');
+    const vendorIdInput = document.getElementById('vendor_id');
+    const vendorDropdown = document.getElementById('vendorDropdown');
+    const vendorDropdownList = document.getElementById('vendorDropdownList');
+    const vendorDropdownEmpty = document.getElementById('vendorDropdownEmpty');
+
+    function setCapacityButtonState(button, selected) {
+        button.classList.remove(...capacitySelectedClasses, ...capacityUnselectedClasses);
+        if (selected) {
+            button.classList.add(...capacitySelectedClasses);
+        } else {
+            button.classList.add(...capacityUnselectedClasses);
+        }
+    }
+
+    function normalizeVendorValue(value) {
+        return value.trim().toLowerCase();
+    }
+
+    function resolveVendorId(value) {
+        if (!value) return '';
+        const normalized = normalizeVendorValue(value);
+        const exactById = vendors.find(v => v.id.toLowerCase() === normalized);
+        if (exactById) return exactById.id;
+
+        const matchByName = vendors.find(v => v.name.toLowerCase() === normalized);
+        if (matchByName) return matchByName.id;
+
+        const matchByCombo = vendors.find(v => {
+            const comboA = `${v.id} - ${v.name}`.toLowerCase();
+            const comboB = `${v.name} (${v.id})`.toLowerCase();
+            return comboA === normalized || comboB === normalized;
+        });
+        return matchByCombo ? matchByCombo.id : '';
+    }
+
+    function syncVendorId() {
+        if (!vendorSearchInput || !vendorIdInput) return;
+        const value = vendorSearchInput.value;
+        vendorIdInput.value = resolveVendorId(value);
+    }
+
+    function renderVendorDropdown(query) {
+        if (!vendorDropdown || !vendorDropdownList || !vendorDropdownEmpty) return;
+        const normalized = normalizeVendorValue(query || '');
+        const matches = vendors.filter(v => {
+            if (!normalized) return true;
+            return v.id.toLowerCase().includes(normalized) || v.name.toLowerCase().includes(normalized);
+        }).slice(0, 8);
+
+        vendorDropdownList.innerHTML = '';
+
+        if (matches.length === 0) {
+            vendorDropdownEmpty.classList.remove('hidden');
+        } else {
+            vendorDropdownEmpty.classList.add('hidden');
+            matches.forEach(vendor => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100';
+                button.innerHTML = `<span class="font-semibold text-slate-900">${vendor.name}</span><span class="text-xs text-slate-500">${vendor.id}</span>`;
+                button.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                    vendorSearchInput.value = `${vendor.name} (${vendor.id})`;
+                    vendorIdInput.value = vendor.id;
+                    hideVendorDropdown();
+                });
+                vendorDropdownList.appendChild(button);
+            });
+        }
+
+        vendorDropdown.classList.remove('hidden');
+    }
+
+    function hideVendorDropdown() {
+        if (!vendorDropdown) return;
+        vendorDropdown.classList.add('hidden');
+    }
+
+    if (vendorSearchInput) {
+        vendorSearchInput.addEventListener('input', function() {
+            syncVendorId();
+            renderVendorDropdown(this.value);
+        });
+        vendorSearchInput.addEventListener('focus', function() {
+            renderVendorDropdown(this.value);
+        });
+        vendorSearchInput.addEventListener('blur', function() {
+            syncVendorId();
+            setTimeout(hideVendorDropdown, 150);
+        });
+    }
+
+    document.addEventListener('click', function(event) {
+        if (!vendorDropdown || !vendorSearchInput) return;
+        if (!vendorDropdown.contains(event.target) && event.target !== vendorSearchInput) {
+            hideVendorDropdown();
+        }
+    });
+
+    function updateAssignStyles() {
+        document.querySelectorAll('[data-assign-option]').forEach(option => {
+            const input = option.querySelector('input[type="radio"]');
+            option.classList.remove(...assignSelectedClasses, ...assignUnselectedClasses);
+            if (input && input.checked) {
+                option.classList.add(...assignSelectedClasses);
             } else {
-                // Enable the remove button
-                removeBtn.disabled = false;
-                removeBtn.style.background = '#f44336';
-                removeBtn.style.color = 'white';
-                removeBtn.style.cursor = 'pointer';
-                removeBtn.title = 'Remove this date';
+                option.classList.add(...assignUnselectedClasses);
             }
         });
     }
 
-    // Handle assign method radio buttons
     document.querySelectorAll('input[name="assign_method"]').forEach(radio => {
         radio.addEventListener('change', function() {
             if (this.value === 'generator') {
-                document.getElementById('generator-method').style.display = 'block';
-                document.getElementById('capacity-method').style.display = 'none';
+                document.getElementById('generator-method').classList.remove('hidden');
+                document.getElementById('capacity-method').classList.add('hidden');
             } else {
-                document.getElementById('generator-method').style.display = 'none';
-                document.getElementById('capacity-method').style.display = 'block';
+                document.getElementById('generator-method').classList.add('hidden');
+                document.getElementById('capacity-method').classList.remove('hidden');
             }
+            updateAssignStyles();
         });
     });
 
-    // Handle capacity button selection
     document.querySelectorAll('.capacity-btn').forEach(btn => {
+        setCapacityButtonState(btn, false);
         btn.addEventListener('click', function(e) {
             e.preventDefault();
-            
-            // Deselect all buttons
-            document.querySelectorAll('.capacity-btn').forEach(b => {
-                b.style.background = 'white';
-                b.style.color = '#333';
-                b.style.borderColor = '#ddd';
-            });
-            
-            // Select this button
-            this.style.background = '#2196F3';
-            this.style.color = 'white';
-            this.style.borderColor = '#2196F3';
-            
-            // Set the hidden input value
+            document.querySelectorAll('.capacity-btn').forEach(b => setCapacityButtonState(b, false));
+            setCapacityButtonState(this, true);
             document.getElementById('capacity_kva').value = this.getAttribute('data-capacity');
         });
     });
 
-    // Handle adding new date inputs
-    const addDateBtn = document.getElementById('add-date-btn');
-    if (addDateBtn) {
-        addDateBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            const container = document.getElementById('dates-container');
-            const dateItem = document.createElement('div');
-            dateItem.className = 'date-item';
-            dateItem.style.cssText = 'display: flex; gap: 10px; margin-bottom: 10px; align-items: center;';
-            dateItem.innerHTML = `
-                <input type="date" class="booking-date" required style="flex: 1;">
-                <button type="button" class="btn-remove-date" style="padding: 5px 10px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">Remove</button>
-            `;
-            container.appendChild(dateItem);
-            
-            // Add remove handler to new button
-            dateItem.querySelector('.btn-remove-date').addEventListener('click', function(e) {
-                e.preventDefault();
-                dateItem.remove();
-                updateRemoveButtons();
-            });
-            
-            updateRemoveButtons();
+    const selectedDatesContainer = document.getElementById('selectedDates');
+    const bookingDatesInput = document.getElementById('bookingDates');
+    let picker = null;
+
+    function updateSelectedDates(selectedDates) {
+        if (!selectedDatesContainer) return;
+        selectedDatesContainer.innerHTML = '';
+
+        if (!selectedDates || selectedDates.length === 0) {
+            selectedDatesContainer.textContent = 'No dates selected.';
+            return;
+        }
+
+        const sortedDates = selectedDates.slice().sort((a, b) => a - b);
+        sortedDates.forEach(date => {
+            const chip = document.createElement('span');
+            chip.className = 'rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm';
+            chip.textContent = picker ? picker.formatDate(date, 'Y-m-d') : date.toISOString().slice(0, 10);
+            selectedDatesContainer.appendChild(chip);
         });
     }
 
-    // Handle removing date inputs
-    document.querySelectorAll('.btn-remove-date').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.preventDefault();
-            if (!this.disabled) {
-                this.closest('.date-item').remove();
-                updateRemoveButtons();
+    if (bookingDatesInput) {
+        picker = flatpickr(bookingDatesInput, {
+            mode: 'multiple',
+            dateFormat: 'Y-m-d',
+            inline: true,
+            onChange: function(selectedDates) {
+                updateSelectedDates(selectedDates);
             }
         });
-    });
+        updateSelectedDates(picker.selectedDates);
+    }
 
-    // Form submission
     const bookingForm = document.getElementById('bookingForm');
     if (bookingForm) {
         bookingForm.addEventListener('submit', async function(e) {
             e.preventDefault();
-            
+
             try {
+                syncVendorId();
                 const vendorId = document.getElementById('vendor_id').value;
                 if (!vendorId) {
-                    alert('Please select a vendor');
+                    alert('Please select a valid vendor from the list');
                     return;
                 }
-                
+
                 const assignMethod = document.querySelector('input[name="assign_method"]:checked').value;
                 const remarks = document.getElementById('remarks').value;
-                
-                // Collect all selected dates
-                const dateInputs = document.querySelectorAll('.booking-date');
-                const dates = Array.from(dateInputs).map(input => input.value).filter(date => date);
-                
-                console.log('Form data:', { vendorId, dates, assignMethod, remarksCount: remarks.length });
-                
+
+                const selectedDates = picker ? picker.selectedDates : [];
+                const dates = selectedDates.map(date => picker.formatDate(date, 'Y-m-d'));
+
                 if (dates.length === 0) {
                     alert('Please select at least one date');
                     return;
                 }
-                
+
                 let generatorId = null;
                 let capacityKva = null;
-                
+
                 if (assignMethod === 'generator') {
                     generatorId = document.getElementById('generator_id').value;
                     if (!generatorId) {
@@ -225,41 +345,35 @@ document.addEventListener('DOMContentLoaded', function() {
                         return;
                     }
                 }
-                
-                // Create an item for each date
+
                 const items = dates.map(date => {
                     const item = {
-                        'date': date,
-                        'remarks': remarks
+                        date: date,
+                        remarks: remarks
                     };
-                    
+
                     if (generatorId) {
-                        item['generator_id'] = generatorId;
+                        item.generator_id = generatorId;
                     } else {
-                        item['capacity_kva'] = parseInt(capacityKva);
+                        item.capacity_kva = parseInt(capacityKva);
                     }
-                    
+
                     return item;
                 });
-                
-                console.log('Submitting booking:', {
-                    'vendor_id': vendorId,
-                    'items': items
-                });
-                
+
                 const response = await fetch('/api/bookings', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        'vendor_id': vendorId,
-                        'items': items
+                        vendor_id: vendorId,
+                        items: items
                     })
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (response.ok) {
                     alert(`Booking created successfully!\nBooking ID: ${data.booking_id}\nDates: ${dates.length}`);
                     window.location.href = `/booking/${data.booking_id}`;
@@ -274,9 +388,8 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
-    // Initial state setup
-    updateRemoveButtons();
+
+    updateAssignStyles();
 });
 </script>
 {% endblock %}

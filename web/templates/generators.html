@@ -1,56 +1,76 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="container">
-    <h1>⚙️ Generators</h1>
-    
-    {% if generators %}
-    <div class="filter-section" style="margin-bottom: 20px;">
-        <input type="text" id="generatorFilter" class="filter-input" placeholder="🔍 Search by ID, Type, or Status..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+<div class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100">
+    <div class="mx-auto max-w-6xl px-4 py-10 lg:py-12" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inventory</div>
+                <h1 class="mt-2 text-2xl font-semibold text-slate-900">Generators</h1>
+                <p class="mt-1 text-sm text-slate-500">Track capacity, availability, and identifiers.</p>
+            </div>
+        </div>
+
+        {% if generators %}
+        <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <input
+                type="text"
+                id="generatorFilter"
+                placeholder="Search by ID, Type, or Status"
+                class="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+            >
+        </div>
+
+        <div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                        <tr>
+                            <th class="px-6 py-4 text-left font-semibold">Generator ID</th>
+                            <th class="px-6 py-4 text-left font-semibold">Capacity (kVA)</th>
+                            <th class="px-6 py-4 text-left font-semibold">Type</th>
+                            <th class="px-6 py-4 text-left font-semibold">Identification</th>
+                            <th class="px-6 py-4 text-left font-semibold">Status</th>
+                            <th class="px-6 py-4 text-left font-semibold">Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 text-slate-700" id="generatorTable">
+                        {% for gen in generators %}
+                        <tr class="transition hover:bg-slate-50">
+                            <td class="px-6 py-4 font-semibold text-slate-900">{{ gen.generator_id }}</td>
+                            <td class="px-6 py-4">{{ gen.capacity_kva }}</td>
+                            <td class="px-6 py-4">{{ gen.type or '-' }}</td>
+                            <td class="px-6 py-4">{{ gen.identification or '-' }}</td>
+                            <td class="px-6 py-4">
+                                <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold
+                                    {% if gen.status == 'Active' %}bg-emerald-100 text-emerald-700
+                                    {% elif gen.status == 'Maintenance' %}bg-amber-100 text-amber-700
+                                    {% else %}bg-rose-100 text-rose-700{% endif %}">
+                                    {{ gen.status }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4">{{ gen.notes or '-' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% else %}
+        <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
+            No generators loaded. Please check the data files in the Data/ folder.
+        </div>
+        {% endif %}
     </div>
-    <table class="data-table" id="generatorTable">
-        <thead>
-            <tr>
-                <th>Generator ID</th>
-                <th>Capacity (kVA)</th>
-                <th>Type</th>
-                <th>Identification</th>
-                <th>Status</th>
-                <th>Notes</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for gen in generators %}
-            <tr>
-                <td><strong>{{ gen.generator_id }}</strong></td>
-                <td>{{ gen.capacity_kva }}</td>
-                <td>{{ gen.type or '-' }}</td>
-                <td>{{ gen.identification or '-' }}</td>
-                <td>
-                    <span class="badge" 
-                          style="background-color: {% if gen.status == 'Active' %}#4CAF50{% elif gen.status == 'Maintenance' %}#FFC107{% else %}#f44336{% endif %};">
-                        {{ gen.status }}
-                    </span>
-                </td>
-                <td>{{ gen.notes or '-' }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="info-box">
-        <p>No generators loaded. Please check the data files in the Data/ folder.</p>
-    </div>
-    {% endif %}
 </div>
 
 <script>
 document.getElementById('generatorFilter')?.addEventListener('keyup', function() {
     const filter = this.value.toUpperCase();
-    const table = document.getElementById('generatorTable');
-    if (!table) return;
-    const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
-    
+    const tableBody = document.getElementById('generatorTable');
+    if (!tableBody) return;
+    const rows = tableBody.getElementsByTagName('tr');
+
     for (let i = 0; i < rows.length; i++) {
         const text = rows[i].textContent.toUpperCase();
         rows[i].style.display = text.includes(filter) ? '' : 'none';
