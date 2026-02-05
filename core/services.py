@@ -118,20 +118,75 @@ class BookingService:
     ) -> str:
         """Create a new booking with items. Returns the generated booking ID.
         
+        If the vendor already has a booking with overlapping dates, 
+        merges the new items into the existing booking instead of creating a new one.
+        
         This method validates ALL items before saving anything to the database,
         ensuring that failed bookings don't leave orphaned records.
         """
-        # Generate booking ID if not provided
-        if not booking_id:
-            booking_id = self.booking_repo.generate_booking_id()
-        
-        self.logger.info(f"Starting booking creation | context={{'booking_id': '{booking_id}', 'item_count': {len(items)}}}")
-        
         # Validate vendor exists
         vendor = self.vendor_repo.get_by_id(vendor_id)
         if not vendor:
             self.logger.warning(f"Booking creation failed: Invalid vendor | context={{'vendor_id': '{vendor_id}'}}")
             raise ValueError(f"Vendor '{vendor_id}' does not exist")
+        
+        # FIRST: Extract dates from items to check for existing overlapping bookings
+        item_dates = []
+        for item_spec in items:
+            if "date" in item_spec:
+                date = item_spec.get("date")
+                item_dates.append(date)
+            elif "start_dt" in item_spec:
+                start_dt = item_spec.get("start_dt")
+                date_part = start_dt.split()[0]  # Extract YYYY-MM-DD
+                item_dates.append(date_part)
+        
+        # Check if vendor has existing bookings with overlapping dates
+        existing_booking_id = None
+        if item_dates:
+            all_vendor_bookings = self.booking_repo.get_all()
+            vendor_bookings = [b for b in all_vendor_bookings if b.vendor_id == vendor_id and b.status == BookingStatus.CONFIRMED.value]
+            
+            for existing_booking in vendor_bookings:
+                existing_items = self.booking_repo.get_items(existing_booking.booking_id)
+                existing_dates = set()
+                for item in existing_items:
+                    date_part = item.start_dt.split()[0]
+                    existing_dates.add(date_part)
+                
+                # Check for any overlap
+                if any(date in existing_dates for date in item_dates):
+                    existing_booking_id = existing_booking.booking_id
+                    self.logger.info(f"Found existing booking for merge | context={{'vendor_id': '{vendor_id}', 'existing_booking': '{existing_booking_id}'}}")
+                    break
+        
+        # If existing booking found with overlapping dates, merge into it
+        if existing_booking_id:
+            self.logger.info(f"Merging new items into existing booking | context={{'vendor_id': '{vendor_id}', 'existing_booking': '{existing_booking_id}', 'new_items': {len(items)}}}")
+            # Validate and add items to existing booking
+            prepared_items = self._validate_items(items)
+            
+            # Save items to existing booking
+            for item_data in prepared_items:
+                booking_item = BookingItem(
+                    booking_id=existing_booking_id,
+                    generator_id=item_data["generator_id"],
+                    start_dt=item_data["start_dt"],
+                    end_dt=item_data["end_dt"],
+                    item_status=BookingStatus.CONFIRMED.value,
+                    remarks=item_data["remarks"]
+                )
+                self.booking_repo.save_item(booking_item)
+            
+            self.logger.info(f"Booking merged successfully | context={{'booking_id': '{existing_booking_id}', 'items_added': {len(prepared_items)}}}")
+            return existing_booking_id
+        
+        # No existing booking found - create new one
+        # Generate booking ID if not provided
+        if not booking_id:
+            booking_id = self.booking_repo.generate_booking_id()
+        
+        self.logger.info(f"Starting booking creation | context={{'booking_id': '{booking_id}', 'item_count': {len(items)}}}")
         
         # Check booking doesn't exist
         if self.booking_repo.get_by_id(booking_id):
@@ -139,6 +194,35 @@ class BookingService:
             raise ValueError(f"Booking '{booking_id}' already exists")
         
         # FIRST: Validate and prepare ALL items (without saving)
+        prepared_items = self._validate_items(items)
+        
+        # SECOND: All items validated - now save to database
+        # Create booking
+        booking = Booking(
+            booking_id=booking_id,
+            vendor_id=vendor_id,
+            created_at=datetime.now().strftime(DATETIME_FORMAT),
+            status=BookingStatus.CONFIRMED.value
+        )
+        self.booking_repo.save(booking)
+        
+        # Save all prepared items
+        for item_data in prepared_items:
+            booking_item = BookingItem(
+                booking_id=booking_id,
+                generator_id=item_data["generator_id"],
+                start_dt=item_data["start_dt"],
+                end_dt=item_data["end_dt"],
+                item_status=BookingStatus.CONFIRMED.value,
+                remarks=item_data["remarks"]
+            )
+            self.booking_repo.save_item(booking_item)
+        
+        self.logger.info(f"Booking created successfully | context={{'booking_id': '{booking_id}', 'items_saved': {len(prepared_items)}}}")
+        return booking_id
+    
+    def _validate_items(self, items: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """Validate all items and return prepared item data."""
         prepared_items = []
         for idx, item_spec in enumerate(items):
             generator_id = item_spec.get("generator_id")
@@ -204,30 +288,7 @@ class BookingService:
                 "remarks": remarks
             })
         
-        # SECOND: All items validated - now save to database
-        # Create booking
-        booking = Booking(
-            booking_id=booking_id,
-            vendor_id=vendor_id,
-            created_at=datetime.now().strftime(DATETIME_FORMAT),
-            status=BookingStatus.CONFIRMED.value
-        )
-        self.booking_repo.save(booking)
-        
-        # Save all prepared items
-        for item_data in prepared_items:
-            booking_item = BookingItem(
-                booking_id=booking_id,
-                generator_id=item_data["generator_id"],
-                start_dt=item_data["start_dt"],
-                end_dt=item_data["end_dt"],
-                item_status=BookingStatus.CONFIRMED.value,
-                remarks=item_data["remarks"]
-            )
-            self.booking_repo.save_item(booking_item)
-        
-        self.logger.info(f"Booking created successfully | context={{'booking_id': '{booking_id}', 'items_saved': {len(prepared_items)}}}")
-        return booking_id
+        return prepared_items
     
     def add_generator(
         self,

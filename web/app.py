@@ -216,23 +216,69 @@ async def bookings_page(request: Request, conn: sqlite3.Connection = Depends(get
         
         bookings = booking_repo.get_all()
         
-        # Enrich bookings with vendor names and item counts
-        bookings_with_vendor = []
+        # Group bookings by vendor with booked dates
+        bookings_by_vendor = {}
         for booking in bookings:
             vendor = vendor_repo.get_by_id(booking.vendor_id)
+            vendor_name = vendor.vendor_name if vendor else "Unknown"
+            
+            if vendor_name not in bookings_by_vendor:
+                bookings_by_vendor[vendor_name] = {
+                    "vendor_id": booking.vendor_id,
+                    "bookings": []
+                }
+            
             items = booking_repo.get_items(booking.booking_id)
-            bookings_with_vendor.append({
+            
+            # Extract unique dates from items
+            booked_dates = set()
+            for item in items:
+                # Extract date from start_dt (YYYY-MM-DD HH:MM format)
+                date_part = item.start_dt.split()[0]
+                booked_dates.add(date_part)
+            
+            booked_dates_str = ", ".join(sorted(booked_dates)) if booked_dates else "N/A"
+            
+            bookings_by_vendor[vendor_name]["bookings"].append({
                 "booking": booking,
-                "vendor_name": vendor.vendor_name if vendor else "Unknown",
-                "item_count": len(items)
+                "items": items,
+                "item_count": len(items),
+                "booked_dates": booked_dates_str
             })
+        
+        # Sort vendors alphabetically
+        sorted_vendors = sorted(bookings_by_vendor.items())
         
         return templates.TemplateResponse("bookings.html", {
             "request": request,
-            "bookings": bookings_with_vendor
+            "bookings_by_vendor": sorted_vendors
         })
     except Exception as e:
         logger.error(f"Error loading bookings page: {e}", exc_info=True)
+        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+
+
+@app.get("/create-booking", response_class=HTMLResponse)
+async def create_booking_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    """Create booking page."""
+    try:
+        vendor_repo = VendorRepository(conn)
+        gen_repo = GeneratorRepository(conn)
+        
+        vendors = vendor_repo.get_all()
+        generators = gen_repo.get_all()
+        
+        # Get unique capacities
+        capacities = sorted(set(g.capacity_kva for g in generators))
+        
+        return templates.TemplateResponse("create_booking.html", {
+            "request": request,
+            "vendors": vendors,
+            "generators": generators,
+            "capacities": capacities
+        })
+    except Exception as e:
+        logger.error(f"Error loading create booking page: {e}", exc_info=True)
         return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
 
 
@@ -274,27 +320,43 @@ async def booking_detail_page(request: Request, booking_id: str, conn: sqlite3.C
         return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
 
 
-@app.get("/create-booking", response_class=HTMLResponse)
-async def create_booking_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
-    """Create booking page."""
+@app.get("/booking/{booking_id}/edit", response_class=HTMLResponse)
+async def edit_booking_page(request: Request, booking_id: str, conn: sqlite3.Connection = Depends(get_db)):
+    """Edit booking page."""
     try:
+        booking_repo = BookingRepository(conn)
         vendor_repo = VendorRepository(conn)
         gen_repo = GeneratorRepository(conn)
         
-        vendors = vendor_repo.get_all()
+        booking = booking_repo.get_by_id(booking_id)
+        if not booking:
+            return templates.TemplateResponse("error.html", {
+                "request": request,
+                "error": f"Booking '{booking_id}' not found"
+            })
+        
+        vendor = vendor_repo.get_by_id(booking.vendor_id)
+        items = booking_repo.get_items(booking_id)
         generators = gen_repo.get_all()
         
-        # Get unique capacities
-        capacities = sorted(set(g.capacity_kva for g in generators))
+        # Enrich items with generator info
+        items_with_gen = []
+        for item in items:
+            gen = gen_repo.get_by_id(item.generator_id)
+            items_with_gen.append({
+                "item": item,
+                "generator_name": f"{gen.generator_id} ({gen.capacity_kva} kVA)" if gen else "Unknown"
+            })
         
-        return templates.TemplateResponse("create_booking.html", {
+        return templates.TemplateResponse("edit_booking.html", {
             "request": request,
-            "vendors": vendors,
-            "generators": generators,
-            "capacities": capacities
+            "booking": booking,
+            "vendor": vendor,
+            "items": items_with_gen,
+            "generators": generators
         })
     except Exception as e:
-        logger.error(f"Error loading create booking page: {e}", exc_info=True)
+        logger.error(f"Error loading edit booking page: {e}", exc_info=True)
         return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
 
 
@@ -409,7 +471,11 @@ async def api_create_booking(
     request_data: CreateBookingRequest,
     conn: sqlite3.Connection = Depends(get_db)
 ):
-    """Create a new booking with auto-generated ID and items."""
+    """Create a new booking with auto-generated ID and items.
+    
+    If vendor already has a booking with overlapping dates,
+    automatically merges the new items into the existing booking.
+    """
     try:
         vendor_id = request_data.vendor_id
         items = [item.dict() for item in request_data.items]
@@ -424,8 +490,25 @@ async def api_create_booking(
         
         service = BookingService(conn)
         # Create booking with auto-generated ID and items
+        # If vendor already has overlapping dates, will merge into existing booking
         booking_id = service.create_booking(vendor_id, items)
-        return {"success": True, "booking_id": booking_id}
+        
+        # Check if this was a merge or new creation
+        booking_repo = BookingRepository(conn)
+        booking = booking_repo.get_by_id(booking_id)
+        item_count = len(booking_repo.get_items(booking_id))
+        
+        # If item_count > requested items, it was merged
+        is_merged = item_count > len(items)
+        message = f"Merged into existing booking" if is_merged else f"New booking created"
+        
+        return {
+            "success": True,
+            "booking_id": booking_id,
+            "message": message,
+            "is_merged": is_merged,
+            "total_items": item_count
+        }
     except ValueError as e:
         logger.warning(f"Validation error creating booking: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -491,6 +574,113 @@ async def api_cancel_booking(
         raise
     except Exception as e:
         logger.error(f"Error cancelling booking: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/bookings/{booking_id}")
+async def api_delete_booking(
+    booking_id: str,
+    conn: sqlite3.Connection = Depends(get_db)
+):
+    """Delete a booking completely."""
+    try:
+        booking_repo = BookingRepository(conn)
+        booking = booking_repo.get_by_id(booking_id)
+        
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        # Delete all booking items first
+        items = booking_repo.get_items(booking_id)
+        cur = conn.cursor()
+        
+        for item in items:
+            cur.execute("DELETE FROM booking_items WHERE id = ?", (item.id,))
+        
+        # Delete the booking
+        cur.execute("DELETE FROM bookings WHERE booking_id = ?", (booking_id,))
+        conn.commit()
+        
+        logger.info(f"Booking deleted | context={{'booking_id': '{booking_id}'}}")
+        return {"success": True, "message": f"Booking {booking_id} deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting booking: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/bookings/{booking_id}/items")
+async def api_add_booking_item(
+    booking_id: str,
+    generator_id: str = Form(...),
+    start_dt: str = Form(...),
+    end_dt: str = Form(...),
+    remarks: str = Form(default=""),
+    conn: sqlite3.Connection = Depends(get_db)
+):
+    """Add a new generator to an existing booking."""
+    try:
+        booking_repo = BookingRepository(conn)
+        booking = booking_repo.get_by_id(booking_id)
+        
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        service = BookingService(conn)
+        # Add generator to booking
+        success, message = service.add_generator(booking_id, generator_id, start_dt, end_dt, remarks)
+        
+        if not success:
+            raise HTTPException(status_code=400, detail=message)
+        
+        return {"success": True, "message": message}
+    except ValueError as e:
+        logger.warning(f"Validation error adding item: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding item to booking: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/bookings/{booking_id}/items/bulk-update")
+async def api_bulk_update_items(
+    booking_id: str,
+    request_data: Dict[str, Any],
+    conn: sqlite3.Connection = Depends(get_db)
+):
+    """Update multiple booking items and remove items."""
+    try:
+        booking_repo = BookingRepository(conn)
+        booking = booking_repo.get_by_id(booking_id)
+        
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        cur = conn.cursor()
+        
+        # Update items
+        updates = request_data.get("updates", [])
+        removes = request_data.get("removes", [])
+        
+        for update in updates:
+            cur.execute(
+                "UPDATE booking_items SET start_dt = ?, end_dt = ?, remarks = ? WHERE id = ?",
+                (update["start_dt"], update["end_dt"], update["remarks"], update["id"])
+            )
+        
+        # Remove items
+        for item_id in removes:
+            cur.execute("DELETE FROM booking_items WHERE id = ?", (item_id,))
+        
+        conn.commit()
+        
+        logger.info(f"Booking items updated | context={{'booking_id': '{booking_id}', 'updates': {len(updates)}, 'removes': {len(removes)}}}")
+        return {"success": True, "message": "Items updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating items: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

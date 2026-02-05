@@ -2,46 +2,63 @@
 
 {% block content %}
 <div class="container">
-    <h1>📅 Bookings</h1>
+    <h1>📅 Bookings by Vendor</h1>
     
-    {% if bookings %}
+    {% if bookings_by_vendor %}
     <div class="filter-section" style="margin-bottom: 20px;">
-        <input type="text" id="bookingFilter" class="filter-input" placeholder="🔍 Search by Booking ID, Vendor, or Status..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+        <input type="text" id="bookingFilter" class="filter-input" placeholder="🔍 Search by Vendor, Status, or Date..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
     </div>
-    <table class="data-table" id="bookingTable">
-        <thead>
-            <tr>
-                <th>Booking ID</th>
-                <th>Vendor</th>
-                <th>Generators</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th>Action</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for book in bookings %}
-            <tr>
-                <td><strong>{{ book.booking.booking_id }}</strong></td>
-                <td>{{ book.vendor_name }}</td>
-                <td>{{ book.item_count }}</td>
-                <td>
-                    {% if book.booking.status == 'Confirmed' %}
-                        <span class="badge" style="background-color: #4CAF50;">{{ book.booking.status }}</span>
-                    {% elif book.booking.status == 'Pending' %}
-                        <span class="badge" style="background-color: #FFC107;">{{ book.booking.status }}</span>
-                    {% else %}
-                        <span class="badge" style="background-color: #f44336;">{{ book.booking.status }}</span>
-                    {% endif %}
-                </td>
-                <td>{{ book.booking.created_at }}</td>
-                <td>
-                    <a href="/booking/{{ book.booking.booking_id }}" class="btn-small">View</a>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+
+    {% for vendor_name, vendor_data in bookings_by_vendor %}
+    <div class="vendor-group" style="margin-bottom: 30px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        <div style="background-color: #2196F3; color: white; padding: 15px; font-size: 16px; font-weight: bold;">
+            👤 {{ vendor_name }}
+        </div>
+        
+        <div style="padding: 15px;">
+            {% if vendor_data.bookings %}
+            <table class="data-table vendor-bookings-table">
+                <thead>
+                    <tr>
+                        <th>Booked Dates</th>
+                        <th>Generators</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for booking_info in vendor_data.bookings %}
+                    <tr>
+                        <td>
+                            <strong>{{ booking_info.booked_dates }}</strong>
+                        </td>
+                        <td>{{ booking_info.item_count }}</td>
+                        <td>
+                            {% if booking_info.booking.status == 'Confirmed' %}
+                                <span class="badge" style="background-color: #4CAF50;">{{ booking_info.booking.status }}</span>
+                            {% elif booking_info.booking.status == 'Pending' %}
+                                <span class="badge" style="background-color: #FFC107;">{{ booking_info.booking.status }}</span>
+                            {% else %}
+                                <span class="badge" style="background-color: #f44336;">{{ booking_info.booking.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ booking_info.booking.created_at }}</td>
+                        <td>
+                            <a href="/booking/{{ booking_info.booking.booking_id }}" class="btn-small" style="background-color: #2196F3; color: white; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 12px; display: inline-block; margin-right: 5px;">View</a>
+                            <a href="/booking/{{ booking_info.booking.booking_id }}/edit" class="btn-small" style="background-color: #FF9800; color: white; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 12px; display: inline-block; margin-right: 5px;">Modify</a>
+                            <button class="btn-small" style="background-color: #f44336; color: white; padding: 6px 12px; border-radius: 4px; font-size: 12px; border: none; cursor: pointer;" onclick="deleteBooking('{{ booking_info.booking.booking_id }}', '{{ vendor_name }}')">Delete</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="padding: 10px; color: #999;">No bookings yet</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
     {% else %}
     <div class="info-box">
         <p>No bookings yet. <a href="/create-booking">Create one now</a></p>
@@ -52,14 +69,76 @@
 <script>
 document.getElementById('bookingFilter')?.addEventListener('keyup', function() {
     const filter = this.value.toUpperCase();
-    const table = document.getElementById('bookingTable');
-    if (!table) return;
-    const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+    const vendorGroups = document.querySelectorAll('.vendor-group');
     
-    for (let i = 0; i < rows.length; i++) {
-        const text = rows[i].textContent.toUpperCase();
-        rows[i].style.display = text.includes(filter) ? '' : 'none';
-    }
+    vendorGroups.forEach(group => {
+        const vendorName = group.querySelector('[style*="background-color: #2196F3"]')?.textContent.toUpperCase() || '';
+        const rows = group.querySelectorAll('tbody tr');
+        let hasVisibleRow = false;
+        
+        rows.forEach(row => {
+            const text = row.textContent.toUpperCase();
+            const isMatch = text.includes(filter);
+            row.style.display = isMatch ? '' : 'none';
+            if (isMatch) hasVisibleRow = true;
+        });
+        
+        // Show vendor group if vendor name matches or has visible rows
+        const vendorMatches = vendorName.includes(filter);
+        group.style.display = (vendorMatches || hasVisibleRow) ? '' : 'none';
+    });
 });
+
+function deleteBooking(bookingId, vendorName) {
+    if (confirm(`Are you sure you want to delete this booking for ${vendorName}?\n\nBooking ID: ${bookingId}`)) {
+        // Send DELETE request
+        fetch(`/api/bookings/${bookingId}`, {
+            method: 'DELETE'
+        })
+        .then(response => {
+            if (response.ok) {
+                alert('Booking deleted successfully');
+                location.reload();
+            } else {
+                return response.json().then(data => {
+                    alert('Error deleting booking: ' + (data.detail || 'Unknown error'));
+                });
+            }
+        })
+        .catch(error => {
+            alert('Error deleting booking: ' + error);
+        });
+    }
+}
 </script>
+
+<style>
+.vendor-group {
+    margin-bottom: 20px;
+}
+
+.vendor-bookings-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.vendor-bookings-table thead {
+    background-color: #f5f5f5;
+}
+
+.vendor-bookings-table th,
+.vendor-bookings-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+.vendor-bookings-table tbody tr:hover {
+    background-color: #f9f9f9;
+}
+
+.btn-small {
+    font-size: 12px;
+}
+</style>
 {% endblock %}
