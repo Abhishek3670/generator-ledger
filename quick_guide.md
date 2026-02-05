@@ -90,7 +90,7 @@ python main.py --cli
 python cli_main.py
 
 # Docker
-docker-compose up
+docker compose up
 ```
 
 ## Important URLs

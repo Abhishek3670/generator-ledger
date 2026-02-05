@@ -133,6 +133,29 @@ class VendorRepository:
                 phone=row[3] or ""
             ))
         return vendors
+    
+    def generate_vendor_id(self) -> str:
+        """Generate the next vendor ID in sequence (VEN001, VEN002, etc.)."""
+        cur = self.conn.cursor()
+        
+        # Get all vendor IDs and extract the numeric part
+        cur.execute("SELECT vendor_id FROM vendors ORDER BY vendor_id")
+        existing_ids = [row[0] for row in cur.fetchall()]
+        
+        # Extract numbers from vendor IDs like "VEN001", "VEN008", etc.
+        max_num = 0
+        for vid in existing_ids:
+            if vid.startswith('VEN'):
+                try:
+                    num = int(vid[3:])
+                    max_num = max(max_num, num)
+                except ValueError:
+                    pass
+        
+        # Generate next vendor ID
+        next_num = max_num + 1
+        vendor_id = f"VEN{next_num:03d}"
+        return vendor_id
 
 
 class BookingRepository:

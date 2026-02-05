@@ -116,7 +116,11 @@ class BookingService:
         items: List[Dict[str, Any]],
         booking_id: Optional[str] = None
     ) -> str:
-        """Create a new booking with items. Returns the generated booking ID."""
+        """Create a new booking with items. Returns the generated booking ID.
+        
+        This method validates ALL items before saving anything to the database,
+        ensuring that failed bookings don't leave orphaned records.
+        """
         # Generate booking ID if not provided
         if not booking_id:
             booking_id = self.booking_repo.generate_booking_id()
@@ -134,16 +138,8 @@ class BookingService:
             self.logger.warning(f"Booking creation failed: Duplicate ID | context={{'booking_id': '{booking_id}'}}")
             raise ValueError(f"Booking '{booking_id}' already exists")
         
-        # Create booking
-        booking = Booking(
-            booking_id=booking_id,
-            vendor_id=vendor_id,
-            created_at=datetime.now().strftime(DATETIME_FORMAT),
-            status=BookingStatus.CONFIRMED.value
-        )
-        self.booking_repo.save(booking)
-        
-        # Process items
+        # FIRST: Validate and prepare ALL items (without saving)
+        prepared_items = []
         for idx, item_spec in enumerate(items):
             generator_id = item_spec.get("generator_id")
             remarks = item_spec.get("remarks", "")
@@ -173,9 +169,15 @@ class BookingService:
                 )
                 if not available:
                     self.logger.warning(f"Auto-assign failed | context={{'capacity': {capacity_kva}, 'start': '{start_dt}'}}")
+                    
+                    # Get total count of generators with this capacity
+                    total_gens = len(self.generator_repo.find_by_capacity(int(capacity_kva), GeneratorStatus.ACTIVE.value))
+                    
                     raise RuntimeError(
                         f"Item {idx + 1}: No available {capacity_kva} kVA generator "
-                        f"for {start_dt} - {end_dt}"
+                        f"for {start_dt} - {end_dt}. "
+                        f"({total_gens} generator(s) exist but all are booked on this date. "
+                        f"Please try a different date or select a different capacity.)"
                     )
                 generator_id = available[0]
             else:
@@ -194,18 +196,37 @@ class BookingService:
                         f"Conflict: {conflict}"
                     )
             
-            # Save item
+            # Store validated item data
+            prepared_items.append({
+                "generator_id": generator_id,
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+                "remarks": remarks
+            })
+        
+        # SECOND: All items validated - now save to database
+        # Create booking
+        booking = Booking(
+            booking_id=booking_id,
+            vendor_id=vendor_id,
+            created_at=datetime.now().strftime(DATETIME_FORMAT),
+            status=BookingStatus.CONFIRMED.value
+        )
+        self.booking_repo.save(booking)
+        
+        # Save all prepared items
+        for item_data in prepared_items:
             booking_item = BookingItem(
                 booking_id=booking_id,
-                generator_id=generator_id,
-                start_dt=start_dt,
-                end_dt=end_dt,
+                generator_id=item_data["generator_id"],
+                start_dt=item_data["start_dt"],
+                end_dt=item_data["end_dt"],
                 item_status=BookingStatus.CONFIRMED.value,
-                remarks=remarks
+                remarks=item_data["remarks"]
             )
             self.booking_repo.save_item(booking_item)
         
-        self.logger.info(f"Booking created successfully | context={{'booking_id': '{booking_id}'}}") 
+        self.logger.info(f"Booking created successfully | context={{'booking_id': '{booking_id}', 'items_saved': {len(prepared_items)}}}")
         return booking_id
     
     def add_generator(

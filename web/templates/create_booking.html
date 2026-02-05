@@ -242,10 +242,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     alert(`Booking created successfully!\nBooking ID: ${data.booking_id}\nDates: ${dates.length}`);
                     window.location.href = `/booking/${data.booking_id}`;
                 } else {
-                    alert('Error: ' + JSON.stringify(data.detail));
+                    const errorMsg = data.detail || 'Unknown error occurred';
+                    alert('❌ Error creating booking:\n\n' + errorMsg);
+                    console.error('Booking error:', data);
                 }
             } catch (error) {
-                alert('Error creating booking: ' + error.message);
+                alert('❌ Error: ' + error.message);
                 console.error(error);
             }
         });

@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request, HTTPException, Form, Depends
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.exceptions import RequestValidationError
 import os
 import sqlite3
 from typing import Optional, List, Dict, Any
@@ -40,8 +41,28 @@ class CreateBookingRequest(BaseModel):
     vendor_id: str
     items: List[BookingItem]
 
+class CreateVendorRequest(BaseModel):
+    vendor_id: Optional[str] = None
+    vendor_name: str
+    vendor_place: str = "Civil Line"
+    phone: str = ""
+
 # FastAPI app
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
+
+# Exception handler for validation errors
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle Pydantic validation errors with proper JSON response."""
+    errors = []
+    for error in exc.errors():
+        errors.append(f"{'.'.join(str(x) for x in error['loc'][1:])}: {error['msg']}")
+    error_message = "; ".join(errors) if errors else "Validation error"
+    logger.warning(f"Validation error: {error_message}")
+    return JSONResponse(
+        status_code=400,
+        content={"detail": error_message}
+    )
 
 # Static files and templates
 template_dir = os.path.join(os.path.dirname(__file__), "templates")
@@ -341,6 +362,46 @@ async def api_bookings(conn: sqlite3.Connection = Depends(get_db)):
     except Exception as e:
         logger.error(f"Error fetching bookings: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/vendors")
+async def api_create_vendor(
+    request_data: CreateVendorRequest,
+    conn: sqlite3.Connection = Depends(get_db)
+):
+    """Create a new vendor with auto-generated ID."""
+    try:
+        vendor_name = request_data.vendor_name.strip() if request_data.vendor_name else ""
+        vendor_place = (request_data.vendor_place.strip() if request_data.vendor_place else "").strip() or "Civil Line"
+        phone = request_data.phone.strip() if request_data.phone else ""
+        
+        if not vendor_name:
+            raise HTTPException(status_code=400, detail="Vendor Name is required")
+        
+        # Auto-generate vendor ID if not provided
+        vendor_id = request_data.vendor_id
+        if not vendor_id or not vendor_id.strip():
+            vendor_repo = VendorRepository(conn)
+            vendor_id = vendor_repo.generate_vendor_id()
+        else:
+            vendor_id = vendor_id.strip()
+        
+        logger.info(f"API vendor creation request | context={{'vendor_id': '{vendor_id}', 'vendor_name': '{vendor_name}'}}")
+        
+        success, message = create_vendor(conn, vendor_id, vendor_name, vendor_place, phone)
+        
+        if success:
+            logger.info(f"Vendor created successfully | context={{'vendor_id': '{vendor_id}'}}")
+            return {"success": True, "message": message, "vendor_id": vendor_id}
+        else:
+            logger.warning(f"Vendor creation failed | context={{'vendor_id': '{vendor_id}', 'reason': '{message}'}}")
+            raise HTTPException(status_code=400, detail=message)
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Error creating vendor: {error_msg}", exc_info=True)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 @app.post("/api/bookings")

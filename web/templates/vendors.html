@@ -2,7 +2,10 @@
 
 {% block content %}
 <div class="container">
-    <h1>👥 Vendors</h1>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h1>👥 Vendors</h1>
+        <button class="btn-primary" onclick="openAddVendorModal()" style="padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">➕ Add New Vendor</button>
+    </div>
     
     {% if vendors %}
     <div class="filter-section" style="margin-bottom: 20px;">
@@ -47,5 +50,96 @@ document.getElementById('vendorFilter')?.addEventListener('keyup', function() {
         rows[i].style.display = text.includes(filter) ? '' : 'none';
     }
 });
+
+// Modal functions
+function openAddVendorModal() {
+    document.getElementById('addVendorModal').style.display = 'block';
+}
+
+function closeAddVendorModal() {
+    document.getElementById('addVendorModal').style.display = 'none';
+    document.getElementById('addVendorForm').reset();
+}
+
+window.onclick = function(event) {
+    const modal = document.getElementById('addVendorModal');
+    if (event.target === modal) {
+        modal.style.display = 'none';
+    }
+}
+
+async function submitAddVendor(e) {
+    e.preventDefault();
+    
+    const vendor_name = document.getElementById('vendorName').value.trim();
+    const vendor_place = document.getElementById('vendorPlace').value.trim() || 'Civil Line';
+    const phone = document.getElementById('vendorPhone').value.trim();
+    
+    if (!vendor_name) {
+        alert('❌ Vendor Name is required');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/vendors', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                vendor_name,
+                vendor_place,
+                phone
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            alert(`✓ Vendor created successfully!\n\nVendor ID: ${data.vendor_id}`);
+            closeAddVendorModal();
+            location.reload();
+        } else {
+            const errorMessage = data.detail || data.message || JSON.stringify(data) || 'Failed to create vendor';
+            alert(`❌ Error: ${errorMessage}`);
+            console.error('Vendor creation error:', data);
+        }
+    } catch (error) {
+        alert(`❌ Error: ${error.message}`);
+        console.error('Fetch error:', error);
+    }
+}
 </script>
+
+<!-- Modal for Adding New Vendor -->
+<div id="addVendorModal" class="modal" style="display: none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.4);">
+    <div class="modal-content" style="background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; border-radius: 8px; width: 90%; max-width: 500px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2 style="margin: 0;">➕ Add New Vendor</h2>
+            <span class="close" onclick="closeAddVendorModal()" style="cursor: pointer; font-size: 28px; font-weight: bold;">&times;</span>
+        </div>
+        
+        <form id="addVendorForm" onsubmit="submitAddVendor(event)">
+            <div style="margin-bottom: 15px;">
+                <label for="vendorName" style="display: block; margin-bottom: 5px; font-weight: bold;">Vendor Name <span style="color: red;">*</span></label>
+                <input type="text" id="vendorName" placeholder="e.g., ABC Generators" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <label for="vendorPlace" style="display: block; margin-bottom: 5px; font-weight: bold;">Location</label>
+                <input type="text" id="vendorPlace" placeholder="Default: Civil Line" value="Civil Line" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <label for="vendorPhone" style="display: block; margin-bottom: 5px; font-weight: bold;">Phone</label>
+                <input type="tel" id="vendorPhone" placeholder="e.g., +1-555-0123" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+            </div>
+            
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button type="button" onclick="closeAddVendorModal()" style="padding: 10px 20px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
+                <button type="submit" style="padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">Create Vendor</button>
+            </div>
+        </form>
+    </div>
+</div>
 {% endblock %}
