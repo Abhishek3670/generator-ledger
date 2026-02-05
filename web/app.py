@@ -191,6 +191,7 @@ async def index(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         
         bookings = booking_repo.get_all()
         generators = gen_repo.get_all()
+        capacities = sorted(set(g.capacity_kva for g in generators))
         vendors = vendor_repo.get_all()
         
         # Count confirmed bookings and generators
@@ -385,6 +386,7 @@ async def edit_booking_page(request: Request, booking_id: str, conn: sqlite3.Con
         vendor = vendor_repo.get_by_id(booking.vendor_id)
         items = booking_repo.get_items(booking_id)
         generators = gen_repo.get_all()
+        capacities = sorted(set(g.capacity_kva for g in generators))
         
         # Enrich items with generator info
         items_with_gen = []
@@ -400,7 +402,8 @@ async def edit_booking_page(request: Request, booking_id: str, conn: sqlite3.Con
             "booking": booking,
             "vendor": vendor,
             "items": items_with_gen,
-            "generators": generators
+            "generators": generators,
+            "capacities": capacities
         })
     except Exception as e:
         logger.error(f"Error loading edit booking page: {e}", exc_info=True)
@@ -518,10 +521,11 @@ async def api_calendar_day(date: str, conn: sqlite3.Connection = Depends(get_db)
         cur.execute(
             """
             SELECT v.vendor_id, v.vendor_name, b.booking_id, bi.generator_id,
-                   bi.start_dt, bi.end_dt, bi.remarks
+                   g.capacity_kva, bi.start_dt, bi.end_dt, bi.remarks
             FROM booking_items bi
             JOIN bookings b ON bi.booking_id = b.booking_id
             JOIN vendors v ON b.vendor_id = v.vendor_id
+            LEFT JOIN generators g ON bi.generator_id = g.generator_id
             WHERE date(bi.start_dt) = ?
               AND bi.item_status = ?
               AND b.status = ?
@@ -532,7 +536,7 @@ async def api_calendar_day(date: str, conn: sqlite3.Connection = Depends(get_db)
 
         vendors: Dict[str, Dict[str, Any]] = {}
         for row in cur.fetchall():
-            vendor_id, vendor_name, booking_id, generator_id, start_dt, end_dt, remarks = row
+            vendor_id, vendor_name, booking_id, generator_id, capacity_kva, start_dt, end_dt, remarks = row
             if vendor_id not in vendors:
                 vendors[vendor_id] = {
                     "vendor_id": vendor_id,
@@ -545,6 +549,7 @@ async def api_calendar_day(date: str, conn: sqlite3.Connection = Depends(get_db)
             )
             booking_group["items"].append({
                 "generator_id": generator_id,
+                "capacity_kva": capacity_kva,
                 "start_dt": start_dt,
                 "end_dt": end_dt,
                 "remarks": remarks or "",
@@ -755,7 +760,8 @@ async def api_delete_booking(
 @app.post("/api/bookings/{booking_id}/items")
 async def api_add_booking_item(
     booking_id: str,
-    generator_id: str = Form(...),
+    generator_id: Optional[str] = Form(default=None),
+    capacity_kva: Optional[int] = Form(default=None),
     start_dt: str = Form(...),
     end_dt: str = Form(...),
     remarks: str = Form(default=""),
@@ -769,9 +775,20 @@ async def api_add_booking_item(
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         
+        generator_id = generator_id.strip() if generator_id else None
+        if not generator_id and capacity_kva is None:
+            raise HTTPException(status_code=400, detail="Provide generator_id or capacity_kva")
+
         service = BookingService(conn)
         # Add generator to booking
-        success, message = service.add_generator(booking_id, generator_id, start_dt, end_dt, remarks)
+        success, message = service.add_generator(
+            booking_id,
+            generator_id=generator_id,
+            capacity_kva=capacity_kva,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            remarks=remarks
+        )
         
         if not success:
             raise HTTPException(status_code=400, detail=message)

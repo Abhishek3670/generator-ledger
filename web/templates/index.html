@@ -195,7 +195,15 @@
                                     booking.items.forEach(item => {
                                         const li = document.createElement('li');
                                         li.className = 'rounded-lg bg-white px-3 py-2';
-                                        li.textContent = `${item.generator_id} | ${item.start_dt} - ${item.end_dt}${item.remarks ? ` | ${item.remarks}` : ''}`;
+                                        let capacityValue = item.capacity_kva;
+                                        if (!capacityValue && item.generator_id) {
+                                            const match = item.generator_id.match(/(\d+)\s*KVA/i);
+                                            if (match) {
+                                                capacityValue = match[1];
+                                            }
+                                        }
+                                        const capacityLabel = capacityValue ? ` (${capacityValue} kVA)` : '';
+                                        li.textContent = `${item.generator_id}${capacityLabel}${item.remarks ? ` | ${item.remarks}` : ''}`;
                                         list.appendChild(li);
                                     });
                                     vendorBlock.appendChild(list);

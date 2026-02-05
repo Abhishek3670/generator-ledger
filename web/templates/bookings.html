@@ -23,7 +23,7 @@
 
         <div class="mt-6 space-y-6">
             {% for vendor_name, vendor_data in bookings_by_vendor %}
-            <div class="vendor-group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" data-vendor-name="{{ vendor_name | lower }}">
+            <div class="vendor-group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" data-search="{{ vendor_name | lower }} {{ vendor_data.vendor_id | lower }}">
                 <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-900 px-5 py-4 text-white">
                     <div class="text-sm font-semibold">{{ vendor_name }}</div>
                     <div class="text-xs text-white/70">{{ vendor_data.vendor_id }}</div>
@@ -45,7 +45,13 @@
                             <tbody class="divide-y divide-slate-100 text-slate-700">
                                 {% for booking_info in vendor_data.bookings %}
                                 <tr class="transition hover:bg-slate-50">
-                                    <td class="px-4 py-3 font-semibold text-slate-900">{{ booking_info.booked_dates }}</td>
+                                    <td class="px-4 py-3 font-semibold text-slate-900">
+                                        <div class="flex flex-col gap-1 text-sm font-semibold text-slate-900">
+                                            {% for date in booking_info.booked_dates.split(', ') %}
+                                            <span>{{ date }}</span>
+                                            {% endfor %}
+                                        </div>
+                                    </td>
                                     <td class="px-4 py-3">{{ booking_info.item_count }}</td>
                                     <td class="px-4 py-3">
                                         <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold
@@ -86,23 +92,30 @@
 </div>
 
 <script>
-document.getElementById('bookingFilter')?.addEventListener('keyup', function() {
-    const filter = this.value.toUpperCase();
-    const vendorGroups = document.querySelectorAll('[data-vendor-name]');
+document.getElementById('bookingFilter')?.addEventListener('input', function() {
+    const filter = this.value.trim().toUpperCase();
+    const vendorGroups = document.querySelectorAll('[data-search]');
 
     vendorGroups.forEach(group => {
-        const vendorName = (group.dataset.vendorName || '').toUpperCase();
+        const searchData = (group.dataset.search || '').toUpperCase();
         const rows = group.querySelectorAll('tbody tr');
         let hasVisibleRow = false;
+        const vendorMatches = !filter || searchData.includes(filter);
 
-        rows.forEach(row => {
-            const text = row.textContent.toUpperCase();
-            const isMatch = text.includes(filter);
-            row.style.display = isMatch ? '' : 'none';
-            if (isMatch) hasVisibleRow = true;
-        });
+        if (vendorMatches) {
+            rows.forEach(row => {
+                row.style.display = '';
+            });
+            hasVisibleRow = rows.length > 0;
+        } else {
+            rows.forEach(row => {
+                const text = row.textContent.toUpperCase();
+                const isMatch = !filter || text.includes(filter);
+                row.style.display = isMatch ? '' : 'none';
+                if (isMatch) hasVisibleRow = true;
+            });
+        }
 
-        const vendorMatches = vendorName.includes(filter);
         if (rows.length === 0) {
             group.style.display = vendorMatches ? '' : 'none';
         } else {

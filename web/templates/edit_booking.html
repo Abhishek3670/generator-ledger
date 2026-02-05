@@ -1,125 +1,140 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="container">
-    <h1>✏️ Edit Booking</h1>
-    
-    <div class="detail-section">
-        <h2>Booking Information</h2>
-        <dl class="detail-list">
-            <dt>Booking ID:</dt>
-            <dd>{{ booking.booking_id }}</dd>
-            
-            <dt>Vendor:</dt>
-            <dd>{{ vendor.vendor_name if vendor else 'Unknown' }}</dd>
-            
-            <dt>Status:</dt>
-            <dd>
-                <span class="badge" 
-                      style="background-color: {% if booking.status == 'Confirmed' %}#4CAF50{% elif booking.status == 'Pending' %}#FFC107{% else %}#f44336{% endif %};">
-                    {{ booking.status }}
-                </span>
-            </dd>
-            
-            <dt>Created:</dt>
-            <dd>{{ booking.created_at }}</dd>
-        </dl>
-    </div>
-    
-    <div class="detail-section">
-        <h2>Edit Assigned Generators</h2>
-        
-        {% if items %}
-        <div class="filter-section" style="margin-bottom: 15px;">
-            <input type="text" id="itemFilter" class="filter-input" placeholder="🔍 Search by Generator, Date, or Status..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+<div class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100">
+    <div class="mx-auto max-w-6xl px-4 py-10 lg:py-12" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Booking</div>
+                <h1 class="mt-2 text-2xl font-semibold text-slate-900">Edit Booking</h1>
+                <p class="mt-1 text-sm text-slate-500">{{ booking.booking_id }}</p>
+            </div>
+            <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold
+                {% if booking.status == 'Confirmed' %}bg-emerald-100 text-emerald-700
+                {% elif booking.status == 'Pending' %}bg-amber-100 text-amber-700
+                {% else %}bg-rose-100 text-rose-700{% endif %}">
+                {{ booking.status }}
+            </span>
         </div>
-        <table class="data-table" id="itemTable">
-            <thead>
-                <tr>
-                    <th>Generator</th>
-                    <th>Start Date & Time</th>
-                    <th>End Date & Time</th>
-                    <th>Status</th>
-                    <th>Remarks</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item_info in items %}
-                <tr data-item-id="{{ item_info.item.id }}">
-                    <td>
-                        <strong>{{ item_info.generator_name }}</strong>
-                    </td>
-                    <td>
-                        <input type="datetime-local" class="start-time" value="{{ item_info.item.start_dt.replace(' ', 'T') }}" style="width: 180px; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-                    </td>
-                    <td>
-                        <input type="datetime-local" class="end-time" value="{{ item_info.item.end_dt.replace(' ', 'T') }}" style="width: 180px; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-                    </td>
-                    <td>
-                        <span class="badge" 
-                              style="background-color: {% if item_info.item.item_status == 'Confirmed' %}#4CAF50{% else %}#f44336{% endif %};">
-                            {{ item_info.item.item_status }}
+
+        <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Booking Information</div>
+            <dl class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <dt class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Booking ID</dt>
+                    <dd class="mt-2 text-sm font-semibold text-slate-900">{{ booking.booking_id }}</dd>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <dt class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Vendor</dt>
+                    <dd class="mt-2 text-sm font-semibold text-slate-900">{{ vendor.vendor_name if vendor else 'Unknown' }}</dd>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <dt class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Status</dt>
+                    <dd class="mt-2">
+                        <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold
+                            {% if booking.status == 'Confirmed' %}bg-emerald-100 text-emerald-700
+                            {% elif booking.status == 'Pending' %}bg-amber-100 text-amber-700
+                            {% else %}bg-rose-100 text-rose-700{% endif %}">
+                            {{ booking.status }}
                         </span>
-                    </td>
-                    <td>
-                        <input type="text" class="remarks" value="{{ item_info.item.remarks or '' }}" style="width: 150px; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-                    </td>
-                    <td>
-                        <button class="btn-danger" style="padding: 6px 12px; border-radius: 4px; font-size: 12px; border: none; cursor: pointer; background-color: #f44336; color: white;" onclick="removeItem(this)">Remove</button>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <p>No generators assigned yet.</p>
-        {% endif %}
-    </div>
-    
-    <div class="detail-section">
-        <h2>Add New Generator to Booking</h2>
-        <form id="addGeneratorForm" style="display: grid; gap: 15px;">
-            <div>
-                <label for="newGenerator" style="display: block; margin-bottom: 5px; font-weight: bold;">Select Generator:</label>
-                <select id="newGenerator" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
-                    <option value="">-- Select a Generator --</option>
-                    {% for gen in generators %}
-                    {% if gen.status == 'Active' %}
-                    <option value="{{ gen.generator_id }}">{{ gen.generator_id }} - {{ gen.capacity_kva }} kVA</option>
-                    {% endif %}
-                    {% endfor %}
-                </select>
-            </div>
-            
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                <div>
-                    <label for="newStartTime" style="display: block; margin-bottom: 5px; font-weight: bold;">Start Date & Time:</label>
-                    <input type="datetime-local" id="newStartTime" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                    </dd>
                 </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <dt class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Created</dt>
+                    <dd class="mt-2 text-sm font-semibold text-slate-900">{{ booking.created_at }}</dd>
+                </div>
+            </dl>
+        </section>
+
+        <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <label for="newEndTime" style="display: block; margin-bottom: 5px; font-weight: bold;">End Date & Time:</label>
-                    <input type="datetime-local" id="newEndTime" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Assignments</div>
+                    <div class="mt-2 text-lg font-semibold text-slate-900">Edit Assigned Generators</div>
                 </div>
             </div>
-            
-            <div>
-                <label for="newRemarks" style="display: block; margin-bottom: 5px; font-weight: bold;">Remarks (Optional):</label>
-                <input type="text" id="newRemarks" placeholder="Enter any remarks..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+
+            {% if items %}
+            <div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <input type="text" id="itemFilter" placeholder="Search by generator, date, or status" class="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
             </div>
-        </form>
-    </div>
-    
-    <div class="actions" style="display: flex; gap: 10px; margin-top: 20px;">
-        <button onclick="saveChanges()" class="btn-primary" style="padding: 10px 20px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
-            💾 Save Changes
-        </button>
-        <button onclick="addNewGenerator()" class="btn-secondary" style="padding: 10px 20px; background-color: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
-            ➕ Add Generator
-        </button>
-        <a href="/bookings" class="btn-secondary" style="padding: 10px 20px; background-color: #757575; color: white; text-decoration: none; border-radius: 4px; display: inline-block; font-size: 14px;">
-            Back to Bookings
-        </a>
+
+            <div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm" id="itemTable">
+                        <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                            <tr>
+                                <th class="px-6 py-4 text-left font-semibold">Generator</th>
+                                <th class="px-6 py-4 text-left font-semibold">Booked Date</th>
+                                <th class="px-6 py-4 text-left font-semibold">Status</th>
+                                <th class="px-6 py-4 text-left font-semibold">Remarks</th>
+                                <th class="px-6 py-4 text-left font-semibold">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 text-slate-700">
+                            {% for item_info in items %}
+                            <tr data-item-id="{{ item_info.item.id }}" class="transition hover:bg-slate-50">
+                                <td class="px-6 py-4 font-semibold text-slate-900">{{ item_info.generator_name }}</td>
+                                <td class="px-6 py-4">
+                                    <input type="date" class="booked-date w-44 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200" value="{{ item_info.item.start_dt.split(' ')[0] }}">
+                                </td>
+                                <td class="px-6 py-4">
+                                    <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold
+                                        {% if item_info.item.item_status == 'Confirmed' %}bg-emerald-100 text-emerald-700
+                                        {% else %}bg-rose-100 text-rose-700{% endif %}">
+                                        {{ item_info.item.item_status }}
+                                    </span>
+                                </td>
+                                <td class="px-6 py-4">
+                                    <input type="text" class="remarks w-40 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200" value="{{ item_info.item.remarks or '' }}">
+                                </td>
+                                <td class="px-6 py-4">
+                                    <button class="rounded-full bg-rose-500 px-3 py-1 text-xs font-semibold text-white transition hover:bg-rose-400" onclick="removeItem(this)">Remove</button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% else %}
+            <div class="mt-4 rounded-xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
+                No generators assigned yet.
+            </div>
+            {% endif %}
+        </section>
+
+        <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Add Generator</div>
+            <div class="mt-2 text-lg font-semibold text-slate-900">Add New Generator to Booking</div>
+            <form id="addGeneratorForm" class="mt-4 grid gap-4">
+                <div>
+                    <label for="newCapacity" class="text-sm font-semibold text-slate-700">Select Capacity (kVA)</label>
+                    <select id="newCapacity" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                        <option value="">-- Select a Capacity --</option>
+                        {% for cap in capacities %}
+                        <option value="{{ cap }}">{{ cap }} kVA</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label for="newBookingDate" class="text-sm font-semibold text-slate-700">Booked Date</label>
+                    <input type="date" id="newBookingDate" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                </div>
+
+                <div>
+                    <label for="newRemarks" class="text-sm font-semibold text-slate-700">Remarks (Optional)</label>
+                    <input type="text" id="newRemarks" placeholder="Enter any remarks..." class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                </div>
+            </form>
+        </section>
+
+        <div class="mt-6 flex flex-wrap items-center gap-3">
+            <button onclick="saveChanges()" class="rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-400">Save Changes</button>
+            <button onclick="addNewGenerator()" class="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">Add Generator</button>
+            <a href="/bookings" class="rounded-full border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">Back to Bookings</a>
+        </div>
     </div>
 </div>
 
@@ -136,28 +151,24 @@ function removeItem(button) {
 }
 
 function addNewGenerator() {
-    const generator = document.getElementById('newGenerator').value;
-    const startTime = document.getElementById('newStartTime').value;
-    const endTime = document.getElementById('newEndTime').value;
+    const capacity = document.getElementById('newCapacity').value;
+    const bookingDate = document.getElementById('newBookingDate').value;
     const remarks = document.getElementById('newRemarks').value;
-    
-    if (!generator || !startTime || !endTime) {
-        alert('Please fill in Generator, Start Time, and End Time');
+
+    if (!capacity || !bookingDate) {
+        alert('Please fill in Capacity and Booked Date');
         return;
     }
-    
-    // Format datetime-local to YYYY-MM-DD HH:MM
-    const startDt = startTime.replace('T', ' ');
-    const endDt = endTime.replace('T', ' ');
-    
-    // Add to form data
+
+    const startDt = `${bookingDate} 00:00`;
+    const endDt = `${bookingDate} 23:59`;
+
     const formData = new FormData();
-    formData.append('generator_id', generator);
+    formData.append('capacity_kva', capacity);
     formData.append('start_dt', startDt);
     formData.append('end_dt', endDt);
     formData.append('remarks', remarks);
-    
-    // Send request to add generator
+
     fetch(`/api/bookings/{{ booking.booking_id }}/items`, {
         method: 'POST',
         body: formData
@@ -179,16 +190,16 @@ function addNewGenerator() {
 
 function saveChanges() {
     const updates = [];
-    
-    // Collect all updated items
+
     const rows = document.querySelectorAll('#itemTable tbody tr');
     rows.forEach(row => {
         if (row.style.display !== 'none') {
             const itemId = row.getAttribute('data-item-id');
-            const startDt = row.querySelector('.start-time').value.replace('T', ' ');
-            const endDt = row.querySelector('.end-time').value.replace('T', ' ');
+            const bookedDate = row.querySelector('.booked-date').value;
+            const startDt = `${bookedDate} 00:00`;
+            const endDt = `${bookedDate} 23:59`;
             const remarks = row.querySelector('.remarks').value;
-            
+
             updates.push({
                 id: itemId,
                 start_dt: startDt,
@@ -197,13 +208,12 @@ function saveChanges() {
             });
         }
     });
-    
+
     if (updates.length === 0 && itemsToRemove.length === 0) {
         alert('No changes to save');
         return;
     }
-    
-    // Send update request
+
     fetch(`/api/bookings/{{ booking.booking_id }}/items/bulk-update`, {
         method: 'POST',
         headers: {
@@ -229,45 +239,4 @@ function saveChanges() {
     });
 }
 </script>
-
-<style>
-.detail-list {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 15px;
-    padding: 15px;
-    background-color: #f9f9f9;
-    border-radius: 4px;
-}
-
-.detail-list dt {
-    font-weight: bold;
-    color: #333;
-}
-
-.detail-list dd {
-    margin: 0;
-    color: #666;
-}
-
-.data-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-.data-table thead {
-    background-color: #f5f5f5;
-}
-
-.data-table th,
-.data-table td {
-    padding: 12px;
-    text-align: left;
-    border-bottom: 1px solid #ddd;
-}
-
-.data-table tbody tr:hover {
-    background-color: #f9f9f9;
-}
-</style>
 {% endblock %}
