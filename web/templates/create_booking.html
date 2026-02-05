@@ -26,16 +26,16 @@
             
             <div class="form-group">
                 <label>
-                    <input type="radio" name="assign_method" value="generator" checked>
+                    <input type="radio" name="assign_method" value="generator">
                     Assign by Generator ID
                 </label>
                 <label>
-                    <input type="radio" name="assign_method" value="capacity">
+                    <input type="radio" name="assign_method" value="capacity" checked>
                     Assign by Capacity (Auto-assign)
                 </label>
             </div>
             
-            <div id="generator-method" style="display: block;">
+            <div id="generator-method" style="display: none;">
                 <div class="form-group">
                     <label for="generator_id">Generator</label>
                     <select id="generator_id" name="generator_id">
@@ -49,15 +49,15 @@
                 </div>
             </div>
             
-            <div id="capacity-method" style="display: none;">
+            <div id="capacity-method" style="display: block;">
                 <div class="form-group">
-                    <label for="capacity_kva">Capacity (kVA)</label>
-                    <select id="capacity_kva" name="capacity_kva">
-                        <option value="">-- Select Capacity --</option>
+                    <label>Capacity (kVA)</label>
+                    <div id="capacity-buttons" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
                         {% for cap in capacities %}
-                        <option value="{{ cap }}">{{ cap }} kVA</option>
+                        <button type="button" class="capacity-btn" data-capacity="{{ cap }}" style="padding: 10px 16px; border: 2px solid #ddd; background: white; color: #333; border-radius: 4px; cursor: pointer; font-weight: 500;">{{ cap }} kVA</button>
                         {% endfor %}
-                    </select>
+                    </div>
+                    <input type="hidden" id="capacity_kva" name="capacity_kva" value="">
                 </div>
             </div>
             
@@ -120,6 +120,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('generator-method').style.display = 'none';
                 document.getElementById('capacity-method').style.display = 'block';
             }
+        });
+    });
+
+    // Handle capacity button selection
+    document.querySelectorAll('.capacity-btn').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            
+            // Deselect all buttons
+            document.querySelectorAll('.capacity-btn').forEach(b => {
+                b.style.background = 'white';
+                b.style.color = '#333';
+                b.style.borderColor = '#ddd';
+            });
+            
+            // Select this button
+            this.style.background = '#2196F3';
+            this.style.color = 'white';
+            this.style.borderColor = '#2196F3';
+            
+            // Set the hidden input value
+            document.getElementById('capacity_kva').value = this.getAttribute('data-capacity');
         });
     });
 
