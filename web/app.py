@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.exceptions import RequestValidationError
 import os
 import sqlite3
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 import logging
 from pydantic import BaseModel
@@ -469,6 +470,99 @@ async def api_bookings(conn: sqlite3.Connection = Depends(get_db)):
         ]
     except Exception as e:
         logger.error(f"Error fetching bookings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/calendar/events")
+async def api_calendar_events(conn: sqlite3.Connection = Depends(get_db)):
+    """Calendar events aggregated by date (confirmed bookings only)."""
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT date(bi.start_dt) as booking_date, COUNT(*) as item_count
+            FROM booking_items bi
+            JOIN bookings b ON bi.booking_id = b.booking_id
+            WHERE bi.item_status = ? AND b.status = ?
+            GROUP BY booking_date
+            ORDER BY booking_date ASC
+            """,
+            (STATUS_CONFIRMED, STATUS_CONFIRMED),
+        )
+        events = []
+        for row in cur.fetchall():
+            booking_date = row[0]
+            item_count = row[1]
+            events.append({
+                "title": f"{item_count} booking(s)",
+                "start": booking_date,
+                "allDay": True,
+                "extendedProps": {"date": booking_date},
+            })
+        return events
+    except Exception as e:
+        logger.error(f"Error fetching calendar events: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/calendar/day")
+async def api_calendar_day(date: str, conn: sqlite3.Connection = Depends(get_db)):
+    """Get vendor bookings for a given date (confirmed only)."""
+    try:
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format (YYYY-MM-DD)")
+
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT v.vendor_id, v.vendor_name, b.booking_id, bi.generator_id,
+                   bi.start_dt, bi.end_dt, bi.remarks
+            FROM booking_items bi
+            JOIN bookings b ON bi.booking_id = b.booking_id
+            JOIN vendors v ON b.vendor_id = v.vendor_id
+            WHERE date(bi.start_dt) = ?
+              AND bi.item_status = ?
+              AND b.status = ?
+            ORDER BY v.vendor_name, b.booking_id
+            """,
+            (date, STATUS_CONFIRMED, STATUS_CONFIRMED),
+        )
+
+        vendors: Dict[str, Dict[str, Any]] = {}
+        for row in cur.fetchall():
+            vendor_id, vendor_name, booking_id, generator_id, start_dt, end_dt, remarks = row
+            if vendor_id not in vendors:
+                vendors[vendor_id] = {
+                    "vendor_id": vendor_id,
+                    "vendor_name": vendor_name,
+                    "bookings": {},
+                }
+            booking_group = vendors[vendor_id]["bookings"].setdefault(
+                booking_id,
+                {"booking_id": booking_id, "items": []},
+            )
+            booking_group["items"].append({
+                "generator_id": generator_id,
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+                "remarks": remarks or "",
+            })
+
+        vendor_list = []
+        for vendor in vendors.values():
+            vendor["bookings"] = list(vendor["bookings"].values())
+            vendor_list.append(vendor)
+
+        return {
+            "date": date,
+            "vendors": vendor_list,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching calendar day detail: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
