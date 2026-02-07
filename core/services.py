@@ -10,15 +10,56 @@ from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime
 
 from .models import (
-    Generator, Vendor, Booking, BookingItem,
+    Generator, Vendor, Booking, BookingItem, BookingHistory,
     BookingStatus, GeneratorStatus
 )
 from .repositories import (
-    GeneratorRepository, VendorRepository, BookingRepository
+    GeneratorRepository, VendorRepository, BookingRepository, BookingHistoryRepository
 )
 from .utils import DateTimeParser, DATETIME_FORMAT, transaction
 from .validation import ensure_booking, ensure_generator, ensure_vendor
 from .database import DatabaseManager
+
+
+def encode_history_items(items: List[Dict[str, str]]) -> str:
+    """Encode generator/date pairs into a compact history string."""
+    parts = []
+    for item in items:
+        generator_id = item.get("generator_id")
+        start_dt = item.get("start_dt", "")
+        if not generator_id:
+            continue
+        date_part = start_dt.split()[0] if start_dt else ""
+        parts.append(f"{generator_id}|{date_part}")
+    return f"items={';'.join(parts)}" if parts else ""
+
+
+def log_booking_history(
+    conn: sqlite3.Connection,
+    event_type: str,
+    booking_id: Optional[str] = None,
+    vendor_id: Optional[str] = None,
+    summary: str = "",
+    details: str = ""
+) -> None:
+    """Record a booking history event without breaking the main flow."""
+    logger = logging.getLogger("BookingHistory")
+    try:
+        repo = BookingHistoryRepository(conn)
+        event = BookingHistory(
+            event_time=datetime.now().strftime(DATETIME_FORMAT),
+            event_type=event_type,
+            booking_id=booking_id,
+            vendor_id=vendor_id,
+            summary=summary,
+            details=details
+        )
+        repo.save(event)
+    except Exception:
+        logger.warning(
+            f"Failed to record history | context={{'event_type': '{event_type}', 'booking_id': '{booking_id}'}}",
+            exc_info=True
+        )
 
 
 class AvailabilityChecker:
@@ -183,6 +224,14 @@ class BookingService:
                     )
                     self.booking_repo.save_item(booking_item, commit=False)
             
+            log_booking_history(
+                self.conn,
+                event_type="booking_merged",
+                booking_id=existing_booking_id,
+                vendor_id=vendor_id,
+                summary="Merged booking items",
+                details=encode_history_items(prepared_items)
+            )
             self.logger.info(f"Booking merged successfully | context={{'booking_id': '{existing_booking_id}', 'items_added': {len(prepared_items)}}}")
             return existing_booking_id
         
@@ -224,6 +273,14 @@ class BookingService:
                 )
                 self.booking_repo.save_item(booking_item, commit=False)
         
+        log_booking_history(
+            self.conn,
+            event_type="booking_created",
+            booking_id=booking_id,
+            vendor_id=vendor_id,
+            summary="New booking created",
+            details=encode_history_items(prepared_items)
+        )
         self.logger.info(f"Booking created successfully | context={{'booking_id': '{booking_id}', 'items_saved': {len(prepared_items)}}}")
         return booking_id
     
@@ -360,6 +417,15 @@ class BookingService:
         )
         self.booking_repo.save_item(item)
         self.logger.info(f"Generator added to booking | context={{'booking_id': '{booking_id}', 'generator_id': '{generator_id}'}}")
+
+        log_booking_history(
+            self.conn,
+            event_type="booking_item_added",
+            booking_id=booking_id,
+            vendor_id=booking.vendor_id,
+            summary="Generator added to booking",
+            details=encode_history_items([{"generator_id": generator_id, "start_dt": start_dt or ""}])
+        )
         
         return True, generator_id
     
@@ -413,6 +479,17 @@ class BookingService:
                    WHERE booking_id = ? AND item_status = ?""",
                 (new_start_dt, new_end_dt, booking_id, BookingStatus.CONFIRMED.value)
             )
+        updated_items = self.booking_repo.get_items(booking_id)
+        log_booking_history(
+            self.conn,
+            event_type="booking_times_modified",
+            booking_id=booking_id,
+            vendor_id=booking.vendor_id,
+            summary="Booking times modified",
+            details=encode_history_items(
+                [{"generator_id": item.generator_id, "start_dt": item.start_dt} for item in updated_items]
+            )
+        )
         self.logger.info(f"Booking times modified successfully | context={{'booking_id': '{booking_id}'}}")
         
         return True, "Updated successfully"
@@ -442,6 +519,17 @@ class BookingService:
                    WHERE booking_id = ?""",
                 (BookingStatus.CANCELLED.value, reason, booking_id)
             )
+        cancelled_items = self.booking_repo.get_items(booking_id)
+        log_booking_history(
+            self.conn,
+            event_type="booking_cancelled",
+            booking_id=booking_id,
+            vendor_id=booking.vendor_id,
+            summary="Booking cancelled",
+            details=encode_history_items(
+                [{"generator_id": item.generator_id, "start_dt": item.start_dt} for item in cancelled_items]
+            )
+        )
         self.logger.info(f"Booking cancelled | context={{'booking_id': '{booking_id}'}}")
         
         return True, "Cancelled successfully"

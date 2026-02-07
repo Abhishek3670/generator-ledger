@@ -69,3 +69,15 @@ class Booking:
     vendor_id: str
     created_at: str
     status: str = BookingStatus.CONFIRMED.value
+
+
+@dataclass
+class BookingHistory:
+    """Booking history event data model."""
+    event_time: str
+    event_type: str
+    booking_id: Optional[str] = None
+    vendor_id: Optional[str] = None
+    summary: str = ""
+    details: str = ""
+    id: Optional[int] = None

@@ -12,6 +12,7 @@ import sqlite3
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import logging
+import re
 from pydantic import BaseModel
 
 from core import (
@@ -22,10 +23,11 @@ from core import (
     GeneratorRepository,
     VendorRepository,
     BookingRepository,
+    BookingHistoryRepository,
 )
 from core.utils import transaction
 from core.validation import ensure_booking
-from core.services import create_vendor, archive_all_bookings
+from core.services import create_vendor, archive_all_bookings, log_booking_history, encode_history_items
 
 # Initialize logging
 from config import (
@@ -293,6 +295,131 @@ async def bookings_page(request: Request, conn: sqlite3.Connection = Depends(get
         })
     except Exception as e:
         logger.error(f"Error loading bookings page: {e}", exc_info=True)
+        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+
+
+@app.get("/history", response_class=HTMLResponse)
+async def history_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    """Booking history page."""
+    try:
+        history_repo = BookingHistoryRepository(conn)
+        vendor_repo = VendorRepository(conn)
+        booking_repo = BookingRepository(conn)
+        gen_repo = GeneratorRepository(conn)
+        events = history_repo.get_all(limit=500)
+
+        generator_cache: Dict[str, Optional[int]] = {}
+
+        def get_capacity(generator_id: str) -> Optional[int]:
+            if generator_id in generator_cache:
+                return generator_cache[generator_id]
+            gen = gen_repo.get_by_id(generator_id)
+            capacity = gen.capacity_kva if gen else None
+            generator_cache[generator_id] = capacity
+            return capacity
+
+        def extract_generators(details: str) -> List[str]:
+            if not details:
+                return []
+            match = re.search(r"generators=([^ ]+)", details)
+            if match:
+                raw = match.group(1)
+                return [part.strip() for part in raw.split(",") if part.strip()]
+            match = re.search(r"generator_id=([^ ]+)", details)
+            if match:
+                return [match.group(1).strip()]
+            return []
+
+        def extract_items(details: str) -> List[Dict[str, str]]:
+            if not details:
+                return []
+            if "items=" in details:
+                items_part = details.split("items=", 1)[1].split(" ", 1)[0]
+                entries = []
+                for token in items_part.split(";"):
+                    token = token.strip()
+                    if not token:
+                        continue
+                    if "|" in token:
+                        generator_id, date_part = token.split("|", 1)
+                    else:
+                        generator_id, date_part = token, ""
+                    entries.append({
+                        "generator_id": generator_id.strip(),
+                        "date": date_part.strip()
+                    })
+                return entries
+            fallback = extract_generators(details)
+            return [{"generator_id": gen_id, "date": ""} for gen_id in fallback]
+
+        event_action_labels = {
+            "booking_created": "Genset Added",
+            "booking_merged": "Genset Added",
+            "booking_item_added": "Genset Added",
+            "booking_items_updated": "Genset Updated",
+            "booking_times_modified": "Genset Updated",
+            "booking_cancelled": "Genset Cancelled",
+            "booking_deleted": "Genset Removed",
+        }
+
+        history_rows = []
+        for event in events:
+            vendor_name = "-"
+            vendor_id = event.vendor_id
+            if vendor_id:
+                vendor = vendor_repo.get_by_id(vendor_id)
+                vendor_name = vendor.vendor_name if vendor else vendor_id
+            elif event.booking_id:
+                booking = booking_repo.get_by_id(event.booking_id)
+                if booking:
+                    vendor = vendor_repo.get_by_id(booking.vendor_id)
+                    vendor_name = vendor.vendor_name if vendor else booking.vendor_id
+
+            items = extract_items(event.details)
+            if not items and event.booking_id:
+                booking_items = booking_repo.get_items(event.booking_id)
+                items = [{
+                    "generator_id": item.generator_id,
+                    "date": item.start_dt.split()[0] if item.start_dt else ""
+                } for item in booking_items]
+
+            generator_ids = [item["generator_id"] for item in items if item.get("generator_id")]
+            generator_summary = ", ".join(sorted(set(generator_ids))) if generator_ids else "-"
+
+            formatted_entries = []
+            for item in items:
+                generator_id = item.get("generator_id")
+                if not generator_id:
+                    continue
+                capacity = get_capacity(generator_id)
+                capacity_label = f" ({capacity}kVA)" if capacity else ""
+                date_label = item.get("date") or "-"
+                formatted_entries.append(f"{generator_id}{capacity_label} [{date_label}]")
+
+            genset_count = len(formatted_entries)
+            generator_list_display = ", ".join(formatted_entries) if formatted_entries else "-"
+            action_label = event_action_labels.get(event.event_type, "Genset Updated")
+            details_display = (
+                f"{action_label} = {genset_count}\n"
+                f"Generator(s) = {generator_list_display}\n"
+                f"Vendor = {vendor_name}"
+            )
+
+            history_rows.append({
+                "event_time": event.event_time,
+                "event_type": event.event_type,
+                "vendor_name": vendor_name,
+                "generators": generator_summary,
+                "summary": event.summary or "",
+                "details_display": details_display
+            })
+
+        return templates.TemplateResponse("history.html", {
+            "request": request,
+            "events": history_rows
+        })
+    except Exception as e:
+        logger.error(f"Error loading history page: {e}", exc_info=True)
         return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
 
 
@@ -733,7 +860,7 @@ async def api_delete_booking(
     try:
         booking_repo = BookingRepository(conn)
         try:
-            ensure_booking(booking_repo, booking_id, message="Booking not found")
+            booking = ensure_booking(booking_repo, booking_id, message="Booking not found")
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         
@@ -748,6 +875,16 @@ async def api_delete_booking(
             # Delete the booking
             cur.execute("DELETE FROM bookings WHERE booking_id = ?", (booking_id,))
         
+        log_booking_history(
+            conn,
+            event_type="booking_deleted",
+            booking_id=booking_id,
+            vendor_id=booking.vendor_id,
+            summary="Booking deleted",
+            details=encode_history_items(
+                [{"generator_id": item.generator_id, "start_dt": item.start_dt} for item in items]
+            )
+        )
         logger.info(f"Booking deleted | context={{'booking_id': '{booking_id}'}}")
         return {"success": True, "message": f"Booking {booking_id} deleted successfully"}
     except HTTPException:
@@ -814,7 +951,7 @@ async def api_bulk_update_items(
     try:
         booking_repo = BookingRepository(conn)
         try:
-            ensure_booking(booking_repo, booking_id, message="Booking not found")
+            booking = ensure_booking(booking_repo, booking_id, message="Booking not found")
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         
@@ -823,6 +960,43 @@ async def api_bulk_update_items(
         # Update items
         updates = request_data.get("updates", [])
         removes = request_data.get("removes", [])
+
+        history_items: List[Dict[str, str]] = []
+        if updates or removes:
+            for update in updates:
+                try:
+                    cur.execute(
+                        "SELECT generator_id FROM booking_items WHERE id = ?",
+                        (update["id"],)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        history_items.append({
+                            "generator_id": row[0],
+                            "start_dt": update.get("start_dt", "")
+                        })
+                except Exception:
+                    logger.warning(
+                        f"Unable to load booking item for history | context={{'id': {update.get('id')}}}",
+                        exc_info=True
+                    )
+            for item_id in removes:
+                try:
+                    cur.execute(
+                        "SELECT generator_id, start_dt FROM booking_items WHERE id = ?",
+                        (item_id,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        history_items.append({
+                            "generator_id": row[0],
+                            "start_dt": row[1]
+                        })
+                except Exception:
+                    logger.warning(
+                        f"Unable to load booking item for history | context={{'id': {item_id}}}",
+                        exc_info=True
+                    )
         
         with transaction(conn):
             for update in updates:
@@ -835,6 +1009,15 @@ async def api_bulk_update_items(
             for item_id in removes:
                 cur.execute("DELETE FROM booking_items WHERE id = ?", (item_id,))
         
+        if updates or removes:
+            log_booking_history(
+                conn,
+                event_type="booking_items_updated",
+                booking_id=booking_id,
+                vendor_id=booking.vendor_id,
+                summary="Booking items updated",
+                details=encode_history_items(history_items)
+            )
         logger.info(f"Booking items updated | context={{'booking_id': '{booking_id}', 'updates': {len(updates)}, 'removes': {len(removes)}}}")
         return {"success": True, "message": "Items updated successfully"}
     except Exception as e:

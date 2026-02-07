@@ -82,11 +82,30 @@ class DatabaseManager:
                 FOREIGN KEY(generator_id) REFERENCES generators(generator_id)
             );
 
+            CREATE TABLE IF NOT EXISTS booking_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_time TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                booking_id TEXT,
+                vendor_id TEXT,
+                summary TEXT,
+                details TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_booking_items_generator 
                 ON booking_items(generator_id, item_status);
 
             CREATE INDEX IF NOT EXISTS idx_booking_items_booking 
                 ON booking_items(booking_id);
+
+            CREATE INDEX IF NOT EXISTS idx_booking_history_time
+                ON booking_history(event_time);
+
+            CREATE INDEX IF NOT EXISTS idx_booking_history_booking
+                ON booking_history(booking_id);
+
+            CREATE INDEX IF NOT EXISTS idx_booking_history_vendor
+                ON booking_history(vendor_id);
             """)
             self.conn.commit()
             self.logger.info("Database schema initialized successfully")

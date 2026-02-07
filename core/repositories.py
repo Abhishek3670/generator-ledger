@@ -6,7 +6,7 @@ import sqlite3
 import logging
 from typing import Optional, List
 
-from .models import Generator, Vendor, Booking, BookingItem, GeneratorStatus
+from .models import Generator, Vendor, Booking, BookingItem, BookingHistory, GeneratorStatus
 
 
 class GeneratorRepository:
@@ -256,3 +256,59 @@ class BookingRepository:
         # Generate ID as BKG-YYYYMMDD-00001
         booking_id = f"BKG-{today}-{count:05d}"
         return booking_id
+
+
+class BookingHistoryRepository:
+    """Repository for booking history events."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+    def save(self, event: BookingHistory, commit: bool = True) -> None:
+        try:
+            cur = self.conn.cursor()
+            cur.execute(
+                """INSERT INTO booking_history
+                (event_time, event_type, booking_id, vendor_id, summary, details)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    event.event_time,
+                    event.event_type,
+                    event.booking_id,
+                    event.vendor_id,
+                    event.summary,
+                    event.details,
+                )
+            )
+            if commit:
+                self.conn.commit()
+        except sqlite3.Error:
+            self.logger.error(
+                "Failed to save booking history event",
+                exc_info=True
+            )
+            raise
+
+    def get_all(self, limit: int = 200) -> List[BookingHistory]:
+        cur = self.conn.cursor()
+        if limit:
+            cur.execute(
+                "SELECT * FROM booking_history ORDER BY event_time DESC, id DESC LIMIT ?",
+                (limit,)
+            )
+        else:
+            cur.execute("SELECT * FROM booking_history ORDER BY event_time DESC, id DESC")
+
+        events = []
+        for row in cur.fetchall():
+            events.append(BookingHistory(
+                id=row[0],
+                event_time=row[1],
+                event_type=row[2],
+                booking_id=row[3],
+                vendor_id=row[4],
+                summary=row[5] or "",
+                details=row[6] or ""
+            ))
+        return events
