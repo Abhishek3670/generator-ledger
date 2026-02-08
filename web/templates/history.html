@@ -23,13 +23,13 @@
 
         <div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div class="overflow-x-auto">
-                <table class="min-w-full text-sm">
+                <table class="min-w-[1100px] w-full text-sm">
                     <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                         <tr>
-                            <th class="px-6 py-4 text-left font-semibold">Time</th>
-                            <th class="px-6 py-4 text-left font-semibold">Event</th>
+                            <th class="w-40 px-6 py-4 text-left font-semibold">Time</th>
+                            <th class="w-40 px-6 py-4 text-center font-semibold">Event</th>
                             <th class="px-6 py-4 text-left font-semibold">Vendor</th>
-                            <th class="px-6 py-4 text-left font-semibold">Generators</th>
+                            <th class="w-56 px-6 py-4 text-left font-semibold">Generators</th>
                             <th class="px-6 py-4 text-left font-semibold">Summary</th>
                             <th class="px-6 py-4 text-left font-semibold">Details</th>
                         </tr>
@@ -37,14 +37,23 @@
                     <tbody class="divide-y divide-slate-100 text-slate-700" id="historyTable">
                         {% for event in events %}
                         <tr class="transition hover:bg-slate-50">
-                            <td class="px-6 py-4 text-xs text-slate-500">{{ event.event_time }}</td>
-                            <td class="px-6 py-4">
-                                <span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                            <td class="w-40 px-6 py-4 text-xs text-slate-500">{{ event.event_time }}</td>
+                            <td class="w-40 px-6 py-4 text-center">
+                                <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold
+                                    {% if event.event_type in ['booking_created', 'booking_merged', 'booking_item_added'] %}
+                                    bg-emerald-100 text-emerald-700
+                                    {% elif event.event_type in ['booking_deleted', 'booking_cancelled'] %}
+                                    bg-rose-100 text-rose-700
+                                    {% elif event.event_type in ['booking_items_updated', 'booking_times_modified'] %}
+                                    bg-amber-100 text-amber-700
+                                    {% else %}
+                                    bg-slate-100 text-slate-700
+                                    {% endif %}">
                                     {{ event.event_type.replace('_', ' ') | title }}
                                 </span>
                             </td>
                             <td class="px-6 py-4 font-semibold text-slate-900">{{ event.vendor_name or '-' }}</td>
-                            <td class="px-6 py-4">{{ event.generators or '-' }}</td>
+                            <td class="w-56 px-6 py-4 whitespace-pre-line">{{ event.generators or '-' }}</td>
                             <td class="px-6 py-4">{{ event.summary or '-' }}</td>
                             <td class="px-6 py-4 text-xs text-slate-500 whitespace-pre-line">{{ event.details_display or '-' }}</td>
                         </tr>

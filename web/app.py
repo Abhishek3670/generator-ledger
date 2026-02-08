@@ -384,7 +384,7 @@ async def history_page(request: Request, conn: sqlite3.Connection = Depends(get_
                 } for item in booking_items]
 
             generator_ids = [item["generator_id"] for item in items if item.get("generator_id")]
-            generator_summary = ", ".join(sorted(set(generator_ids))) if generator_ids else "-"
+            generator_summary = "\n".join(sorted(set(generator_ids))) if generator_ids else "-"
 
             formatted_entries = []
             for item in items:
@@ -397,7 +397,7 @@ async def history_page(request: Request, conn: sqlite3.Connection = Depends(get_
                 formatted_entries.append(f"{generator_id}{capacity_label} [{date_label}]")
 
             genset_count = len(formatted_entries)
-            generator_list_display = ", ".join(formatted_entries) if formatted_entries else "-"
+            generator_list_display = "\n".join(formatted_entries) if formatted_entries else "-"
             action_label = event_action_labels.get(event.event_type, "Genset Updated")
             details_display = (
                 f"{action_label} = {genset_count}\n"
