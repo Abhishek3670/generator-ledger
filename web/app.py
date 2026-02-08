@@ -89,20 +89,25 @@ if os.path.exists(static_dir):
 
 templates = Jinja2Templates(directory=template_dir)
 
-# Global database manager
-db_manager: Optional[DatabaseManager] = None
-
-
-def get_db():
-    """Dependency for getting database connection."""
-    if db_manager is None or db_manager.conn is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
-    return db_manager.conn
+async def get_db():
+    """Dependency for getting a per-request database connection."""
+    conn: Optional[sqlite3.Connection] = None
+    try:
+        conn = sqlite3.connect(
+            DB_PATH,
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+        )
+        yield conn
+    except sqlite3.Error as e:
+        logger.error(f"Database connection failed | context={{'db_path': '{DB_PATH}'}}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
 
 
 def initialize_app():
     """Initialize database and services."""
-    global db_manager
     db_manager = DatabaseManager(DB_PATH)
     conn = db_manager.connect()
     db_manager.init_schema()
@@ -110,15 +115,13 @@ def initialize_app():
     # Load sample data
     loader = DataLoader(conn)
     loader.load_from_excel()
-    
+
+    db_manager.close()
     logger.info("FastAPI application initialized successfully")
 
 
 def shutdown_app():
     """Shutdown and cleanup."""
-    global db_manager
-    if db_manager:
-        db_manager.close()
     logger.info("FastAPI application shutdown")
 
 
