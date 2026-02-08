@@ -137,25 +137,40 @@ class VendorRepository:
     def generate_vendor_id(self) -> str:
         """Generate the next vendor ID in sequence (VEN001, VEN002, etc.)."""
         cur = self.conn.cursor()
-        
-        # Get all vendor IDs and extract the numeric part
-        cur.execute("SELECT vendor_id FROM vendors ORDER BY vendor_id")
-        existing_ids = [row[0] for row in cur.fetchall()]
-        
-        # Extract numbers from vendor IDs like "VEN001", "VEN008", etc.
-        max_num = 0
-        for vid in existing_ids:
-            if vid.startswith('VEN'):
-                try:
-                    num = int(vid[3:])
-                    max_num = max(max_num, num)
-                except ValueError:
-                    pass
-        
-        # Generate next vendor ID
-        next_num = max_num + 1
-        vendor_id = f"VEN{next_num:03d}"
-        return vendor_id
+        started_tx = False
+        if not self.conn.in_transaction:
+            self.conn.execute("BEGIN IMMEDIATE")
+            started_tx = True
+
+        try:
+            cur.execute(
+                "INSERT OR IGNORE INTO vendor_id_seq (id, next_val) VALUES (1, 1)"
+            )
+            cur.execute("SELECT next_val FROM vendor_id_seq WHERE id = 1")
+            row = cur.fetchone()
+            seq_val = row[0] if row else 1
+
+            cur.execute(
+                "SELECT MAX(CAST(SUBSTR(vendor_id, 4) AS INTEGER)) "
+                "FROM vendors WHERE vendor_id GLOB 'VEN[0-9]*'"
+            )
+            max_row = cur.fetchone()
+            max_existing = max_row[0] if max_row and max_row[0] else 0
+
+            next_num = max(seq_val, max_existing + 1)
+            cur.execute(
+                "UPDATE vendor_id_seq SET next_val = ? WHERE id = 1",
+                (next_num + 1,)
+            )
+
+            if started_tx:
+                self.conn.commit()
+
+            return f"VEN{next_num:03d}"
+        except Exception:
+            if started_tx:
+                self.conn.rollback()
+            raise
 
 
 class BookingRepository:
@@ -244,18 +259,47 @@ class BookingRepository:
         """Generate the next booking ID in sequence."""
         from datetime import datetime
         cur = self.conn.cursor()
-        
-        # Get count of bookings for today
         today = datetime.now().strftime("%Y%m%d")
-        cur.execute(
-            "SELECT COUNT(*) FROM bookings WHERE booking_id LIKE ?",
-            (f"BKG-{today}-%",)
-        )
-        count = cur.fetchone()[0] + 1
-        
-        # Generate ID as BKG-YYYYMMDD-00001
-        booking_id = f"BKG-{today}-{count:05d}"
-        return booking_id
+
+        started_tx = False
+        if not self.conn.in_transaction:
+            self.conn.execute("BEGIN IMMEDIATE")
+            started_tx = True
+
+        try:
+            cur.execute(
+                "INSERT OR IGNORE INTO booking_id_seq (booking_date, next_val) VALUES (?, 1)",
+                (today,)
+            )
+            cur.execute(
+                "SELECT next_val FROM booking_id_seq WHERE booking_date = ?",
+                (today,)
+            )
+            row = cur.fetchone()
+            seq_val = row[0] if row else 1
+
+            cur.execute(
+                "SELECT MAX(CAST(SUBSTR(booking_id, 14) AS INTEGER)) "
+                "FROM bookings WHERE booking_id LIKE ?",
+                (f"BKG-{today}-%",)
+            )
+            max_row = cur.fetchone()
+            max_existing = max_row[0] if max_row and max_row[0] else 0
+
+            next_num = max(seq_val, max_existing + 1)
+            cur.execute(
+                "UPDATE booking_id_seq SET next_val = ? WHERE booking_date = ?",
+                (next_num + 1, today)
+            )
+
+            if started_tx:
+                self.conn.commit()
+
+            return f"BKG-{today}-{next_num:05d}"
+        except Exception:
+            if started_tx:
+                self.conn.rollback()
+            raise
 
 
 class BookingHistoryRepository:

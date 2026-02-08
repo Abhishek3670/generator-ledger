@@ -92,6 +92,18 @@ class DatabaseManager:
                 details TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS booking_id_seq (
+                booking_date TEXT PRIMARY KEY,
+                next_val INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS vendor_id_seq (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                next_val INTEGER NOT NULL
+            );
+
+            INSERT OR IGNORE INTO vendor_id_seq (id, next_val) VALUES (1, 1);
+
             CREATE INDEX IF NOT EXISTS idx_booking_items_generator 
                 ON booking_items(generator_id, item_status);
 
