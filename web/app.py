@@ -20,6 +20,7 @@ from core import (
     BookingService,
     DataLoader,
     ExportService,
+    AvailabilityChecker,
     GeneratorRepository,
     VendorRepository,
     BookingRepository,
@@ -957,29 +958,55 @@ async def api_bulk_update_items(
         
         cur = conn.cursor()
         
-        # Update items
         updates = request_data.get("updates", [])
         removes = request_data.get("removes", [])
 
+        availability = AvailabilityChecker(conn)
         history_items: List[Dict[str, str]] = []
         if updates or removes:
             for update in updates:
+                item_id = update.get("id")
+                start_dt = update.get("start_dt")
+                end_dt = update.get("end_dt")
+
+                if not item_id:
+                    raise HTTPException(status_code=400, detail="Update item missing id")
+                if not start_dt or not end_dt:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Update item {item_id}: start_dt and end_dt are required"
+                    )
+
+                cur.execute(
+                    "SELECT generator_id FROM booking_items WHERE id = ?",
+                    (item_id,)
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail=f"Booking item {item_id} not found")
+
+                generator_id = row[0]
                 try:
-                    cur.execute(
-                        "SELECT generator_id FROM booking_items WHERE id = ?",
-                        (update["id"],)
+                    is_available, conflict = availability.is_available(
+                        generator_id,
+                        start_dt,
+                        end_dt,
+                        exclude_booking_id=booking_id
                     )
-                    row = cur.fetchone()
-                    if row:
-                        history_items.append({
-                            "generator_id": row[0],
-                            "start_dt": update.get("start_dt", "")
-                        })
-                except Exception:
-                    logger.warning(
-                        f"Unable to load booking item for history | context={{'id': {update.get('id')}}}",
-                        exc_info=True
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=f"Update item {item_id}: {e}")
+
+                if not is_available:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Update item {item_id}: Generator {generator_id} not available. Conflict: {conflict}"
                     )
+
+                history_items.append({
+                    "generator_id": generator_id,
+                    "start_dt": start_dt
+                })
+
             for item_id in removes:
                 try:
                     cur.execute(
@@ -1020,6 +1047,8 @@ async def api_bulk_update_items(
             )
         logger.info(f"Booking items updated | context={{'booking_id': '{booking_id}', 'updates': {len(updates)}, 'removes': {len(removes)}}}")
         return {"success": True, "message": "Items updated successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating items: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
