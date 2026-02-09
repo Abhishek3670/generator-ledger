@@ -16,6 +16,10 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - DEBUG=False
+      - SESSION_SECRET=yjMzyuB38DXJBdunx2jUG5yDsIVBUwR9d141DEI2PUx1TTVy2wkwdhmeZf6TzgoL
+      - OWNER_USERNAME=owner
+      - OWNER_PASSWORD=Qwerty@345
+      - LOAD_SEED_DATA=false
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]

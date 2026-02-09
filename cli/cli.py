@@ -12,6 +12,7 @@ from core import (
     BookingService,
     DataLoader,
     ExportService,
+    GeneratorRepository,
 )
 from core.services import archive_all_bookings, create_vendor
 from config import LOAD_SEED_DATA, OWNER_USERNAME, OWNER_PASSWORD
@@ -80,10 +81,11 @@ class CLI:
                 print("8. Export CSVs")
                 print("9. Archive all bookings (clear for new month)")
                 print("10. Add new vendor")
-                print("11. Exit")
+                print("11. Delete generator")
+                print("12. Exit")
                 print("=" * 50)
                 
-                choice = input("Choose an option (1-11): ").strip()
+                choice = input("Choose an option (1-12): ").strip()
                 
                 try:
                     if choice == '1':
@@ -172,11 +174,13 @@ class CLI:
                         else:
                             print(f'\n✗ Failed: {msg}')
                     elif choice == '11':
+                        self.delete_generator_interactive()
+                    elif choice == '12':
                         self.logger.info("User requested exit")
                         print('Goodbye!')
                         break
                     else:
-                        print('Invalid choice. Please enter 1-11.')
+                        print('Invalid choice. Please enter 1-12.')
                         
                 except Exception as e:
                     self.logger.error("CLI operation failed", exc_info=True)
@@ -312,3 +316,39 @@ class CLI:
             print(f'✓ {msg}')
         else:
             print(f'✗ Failed: {msg}')
+
+    def delete_generator_interactive(self) -> None:
+        """Interactive generator deletion (blocked if bookings exist)."""
+        generator_id = input('Generator ID to delete: ').strip()
+        if not generator_id:
+            print("✗ Generator ID cannot be empty")
+            return
+
+        repo = GeneratorRepository(self.conn)
+        gen = repo.get_by_id(generator_id)
+        if not gen:
+            print(f"✗ Generator '{generator_id}' not found")
+            return
+
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM booking_items WHERE generator_id = ?",
+            (generator_id,)
+        )
+        count = int(cur.fetchone()[0])
+        if count > 0:
+            print(f"✗ Cannot delete. Generator has {count} booking item(s).")
+            return
+
+        confirm = input(f"Type 'DELETE' to confirm removal of {generator_id}: ").strip()
+        if confirm != 'DELETE':
+            print("Delete cancelled.")
+            return
+
+        try:
+            cur.execute("DELETE FROM generators WHERE generator_id = ?", (generator_id,))
+            self.conn.commit()
+            print(f"✓ Deleted generator {generator_id}")
+        except Exception as e:
+            self.logger.error("Generator deletion failed", exc_info=True)
+            print(f"✗ Failed: {e}")

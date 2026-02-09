@@ -56,6 +56,7 @@ from config import (
     APP_VERSION,
     STATUS_CONFIRMED,
     GEN_STATUS_ACTIVE,
+    GEN_STATUS_INACTIVE,
 )
 setup_logging()
 
@@ -84,6 +85,7 @@ class CreateGeneratorRequest(BaseModel):
     type: str
     identification: str = ""
     notes: str = ""
+    status: Optional[str] = GEN_STATUS_ACTIVE
 
 # FastAPI app
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
@@ -407,6 +409,7 @@ async def generators_page(request: Request, conn: sqlite3.Connection = Depends(g
     try:
         gen_repo = GeneratorRepository(conn)
         generators = gen_repo.get_all()
+        capacities = sorted(set(g.capacity_kva for g in generators))
 
         selected_date = request.query_params.get("date")
         if selected_date:
@@ -450,7 +453,8 @@ async def generators_page(request: Request, conn: sqlite3.Connection = Depends(g
             request,
             generators=generators,
             booking_status=booking_status,
-            selected_date=selected_date or ""
+            selected_date=selected_date or "",
+            capacities=capacities
         ))
     except Exception as e:
         logger.error(f"Error loading generators page: {e}", exc_info=True)
@@ -1047,6 +1051,9 @@ async def api_create_generator(
 
         identification_raw = (request_data.identification or "").strip()
         notes_raw = (request_data.notes or "").strip()
+        status_raw = (request_data.status or GEN_STATUS_ACTIVE).strip()
+        if status_raw not in {GEN_STATUS_ACTIVE, GEN_STATUS_INACTIVE}:
+            raise HTTPException(status_code=400, detail="Operational Status must be Active or Inactive")
 
         def normalize_token(value: str) -> str:
             return re.sub(r"[^A-Za-z0-9]+", "", value.upper())
@@ -1084,7 +1091,7 @@ async def api_create_generator(
             capacity_kva=capacity_kva,
             identification=identification_raw,
             type=type_raw,
-            status=GEN_STATUS_ACTIVE,
+            status=status_raw,
             notes=notes_raw
         )
         gen_repo.save(generator)
