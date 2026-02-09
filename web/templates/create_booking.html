@@ -482,6 +482,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         dates: derivedDates,
                         items: detailItems
                     });
+                } else if (response.status === 401) {
+                    window.location.href = '/login';
                 } else {
                     const errorMsg = data.detail || 'Unknown error occurred';
                     alert('❌ Error creating booking:\n\n' + errorMsg);

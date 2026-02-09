@@ -9,12 +9,14 @@
                 <h1 class="mt-2 text-2xl font-semibold text-slate-900">Vendors</h1>
                 <p class="mt-1 text-sm text-slate-500">Manage partners and contact details.</p>
             </div>
-            <button
-                class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
-                onclick="openAddVendorModal()"
-            >
-                + Add New Vendor
-            </button>
+            {% if user and user.role == 'admin' %}
+                <button
+                    class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                    onclick="openAddVendorModal()"
+                >
+                    + Add New Vendor
+                </button>
+            {% endif %}
         </div>
 
         {% if vendors %}
@@ -59,6 +61,7 @@
     </div>
 </div>
 
+{% if user and user.role == 'admin' %}
 <div id="addVendorModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
     <div class="w-full max-w-lg rounded-2xl bg-white shadow-xl">
         <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
@@ -111,6 +114,7 @@
         </form>
     </div>
 </div>
+{% endif %}
 
 <script>
 document.getElementById('vendorFilter')?.addEventListener('keyup', function() {
@@ -176,6 +180,8 @@ async function submitAddVendor(e) {
             alert(`✓ Vendor created successfully!\n\nVendor ID: ${data.vendor_id}`);
             closeAddVendorModal();
             location.reload();
+        } else if (response.status === 401) {
+            window.location.href = '/login';
         } else {
             const errorMessage = data.detail || data.message || JSON.stringify(data) || 'Failed to create vendor';
             alert(`❌ Error: ${errorMessage}`);

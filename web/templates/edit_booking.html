@@ -177,6 +177,8 @@ function addNewGenerator() {
         if (response.ok) {
             alert('Generator added! Click "Save Changes" to persist.');
             location.reload();
+        } else if (response.status === 401) {
+            window.location.href = '/login';
         } else {
             return response.json().then(data => {
                 alert('Error: ' + (data.detail || 'Failed to add generator'));
@@ -228,6 +230,8 @@ function saveChanges() {
         if (response.ok) {
             alert('Changes saved successfully!');
             window.location.href = '/bookings';
+        } else if (response.status === 401) {
+            window.location.href = '/login';
         } else {
             return response.json().then(data => {
                 alert('Error saving changes: ' + (data.detail || 'Unknown error'));

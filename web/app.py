@@ -3,7 +3,7 @@ FastAPI web application for Generator Booking Ledger.
 """
 
 from fastapi import FastAPI, Request, HTTPException, Form, Depends
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.exceptions import RequestValidationError
@@ -14,6 +14,7 @@ from typing import Optional, List, Dict, Any
 import logging
 import re
 from pydantic import BaseModel
+from starlette.middleware.sessions import SessionMiddleware
 
 from core import (
     DatabaseManager,
@@ -25,10 +26,17 @@ from core import (
     VendorRepository,
     BookingRepository,
     BookingHistoryRepository,
+    UserRepository,
 )
 from core.utils import transaction
 from core.validation import ensure_booking
 from core.services import create_vendor, archive_all_bookings, log_booking_history, encode_history_items
+from core.auth import (
+    hash_password,
+    verify_password,
+    ensure_owner_user,
+    validate_password_length,
+)
 
 # Initialize logging
 from config import (
@@ -37,6 +45,12 @@ from config import (
     HOST,
     PORT,
     DEBUG,
+    LOAD_SEED_DATA,
+    SESSION_SECRET,
+    OWNER_USERNAME,
+    OWNER_PASSWORD,
+    ROLE_ADMIN,
+    ROLE_OPERATOR,
     APP_TITLE,
     APP_VERSION,
     STATUS_CONFIRMED,
@@ -66,6 +80,21 @@ class CreateVendorRequest(BaseModel):
 # FastAPI app
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
 
+if not SESSION_SECRET:
+    raise RuntimeError("SESSION_SECRET must be set for production authentication")
+
+PUBLIC_PATHS = {
+    "/login",
+    "/health",
+    "/api/info",
+    "/docs",
+    "/docs/oauth2-redirect",
+    "/redoc",
+    "/openapi.json",
+}
+PUBLIC_PREFIXES = ("/static",)
+ALLOWED_ROLES = {ROLE_ADMIN, ROLE_OPERATOR}
+
 # Exception handler for validation errors
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -80,6 +109,18 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": error_message}
     )
 
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Return JSON for API errors and HTML for page errors."""
+    if request.url.path.startswith("/api"):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return templates.TemplateResponse(
+        "error.html",
+        template_context(request, error=exc.detail),
+        status_code=exc.status_code
+    )
+
 # Static files and templates
 template_dir = os.path.join(os.path.dirname(__file__), "templates")
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -89,14 +130,27 @@ if os.path.exists(static_dir):
 
 templates = Jinja2Templates(directory=template_dir)
 
-async def get_db():
+def template_context(request: Request, **kwargs: Any) -> Dict[str, Any]:
+    """Standard template context with user attached."""
+    context = {"request": request, "user": getattr(request.state, "user", None)}
+    context.update(kwargs)
+    return context
+
+
+async def get_db(request: Request):
     """Dependency for getting a per-request database connection."""
-    conn: Optional[sqlite3.Connection] = None
+    conn = getattr(request.state, "db", None)
+    if conn:
+        yield conn
+        return
+
+    conn = None
     try:
         conn = sqlite3.connect(
             DB_PATH,
             detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
         )
+        conn.execute("PRAGMA foreign_keys = ON")
         yield conn
     except sqlite3.Error as e:
         logger.error(f"Database connection failed | context={{'db_path': '{DB_PATH}'}}", exc_info=True)
@@ -106,15 +160,91 @@ async def get_db():
             conn.close()
 
 
+def get_current_user(request: Request):
+    """Return current user from request state."""
+    user = getattr(request.state, "user", None)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return user
+
+
+def require_role(*roles: str):
+    """Require the current user to have one of the specified roles."""
+    def _checker(request: Request):
+        user = get_current_user(request)
+        if user.role not in roles:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return user
+    return _checker
+
+
+def get_actor(request: Request) -> str:
+    """Return the username for audit logs."""
+    user = getattr(request.state, "user", None)
+    if user and getattr(user, "username", None):
+        return user.username
+    return "unknown"
+
+
+@app.middleware("http")
+async def db_auth_middleware(request: Request, call_next):
+    """Attach DB connection and enforce authentication for protected routes."""
+    conn: Optional[sqlite3.Connection] = None
+    try:
+        conn = sqlite3.connect(
+            DB_PATH,
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+        )
+        conn.execute("PRAGMA foreign_keys = ON")
+        request.state.db = conn
+
+        path = request.url.path
+        if path in PUBLIC_PATHS or any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES):
+            return await call_next(request)
+
+        user_id = request.session.get("user_id")
+        if not user_id:
+            if path.startswith("/api"):
+                return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+            return RedirectResponse("/login", status_code=303)
+
+        repo = UserRepository(conn)
+        user = repo.get_by_id(int(user_id))
+        if not user or not user.is_active:
+            request.session.clear()
+            if path.startswith("/api"):
+                return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+            return RedirectResponse("/login", status_code=303)
+
+        request.state.user = user
+        return await call_next(request)
+    finally:
+        if conn:
+            conn.close()
+
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    https_only=not DEBUG,
+    same_site="lax",
+)
+
+
 def initialize_app():
     """Initialize database and services."""
     db_manager = DatabaseManager(DB_PATH)
     conn = db_manager.connect()
     db_manager.init_schema()
+
+    ensure_owner_user(conn, OWNER_USERNAME, OWNER_PASSWORD, strict=True)
     
     # Load sample data
-    loader = DataLoader(conn)
-    loader.load_from_excel()
+    if LOAD_SEED_DATA:
+        loader = DataLoader(conn)
+        loader.load_from_excel()
+    else:
+        logger.info("Seed data load skipped (LOAD_SEED_DATA=false)")
 
     db_manager.close()
     logger.info("FastAPI application initialized successfully")
@@ -183,6 +313,51 @@ async def app_info():
     }
 
 
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Login page."""
+    if request.session.get("user_id"):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse("login.html", template_context(request))
+
+
+@app.post("/login")
+async def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    conn: sqlite3.Connection = Depends(get_db)
+):
+    """Authenticate user and create session."""
+    repo = UserRepository(conn)
+    try:
+        validate_password_length(password)
+    except ValueError:
+        return templates.TemplateResponse(
+            "login.html",
+            template_context(request, error="Invalid username or password"),
+            status_code=401
+        )
+    user = repo.get_by_username(username.strip())
+    if not user or not user.is_active or not verify_password(password, user.password_hash):
+        return templates.TemplateResponse(
+            "login.html",
+            template_context(request, error="Invalid username or password"),
+            status_code=401
+        )
+
+    request.session["user_id"] = user.id
+    repo.update_last_login(user.id)
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    """Clear user session."""
+    request.session.clear()
+    return RedirectResponse("/login", status_code=303)
+
+
 # ============================================================================
 # WEB PAGES
 # ============================================================================
@@ -205,20 +380,17 @@ async def index(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         active_generators = len([g for g in generators if g.status == GEN_STATUS_ACTIVE])
         total_vendors = len(vendors)
         
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "total_bookings": len(bookings),
-            "confirmed_bookings": confirmed_bookings,
-            "total_generators": len(generators),
-            "active_generators": active_generators,
-            "total_vendors": total_vendors,
-        })
+        return templates.TemplateResponse("index.html", template_context(
+            request,
+            total_bookings=len(bookings),
+            confirmed_bookings=confirmed_bookings,
+            total_generators=len(generators),
+            active_generators=active_generators,
+            total_vendors=total_vendors,
+        ))
     except Exception as e:
         logger.error(f"Error loading dashboard: {e}", exc_info=True)
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "error": str(e)
-        })
+        return templates.TemplateResponse("error.html", template_context(request, error=str(e)))
 
 
 @app.get("/generators", response_class=HTMLResponse)
@@ -227,13 +399,13 @@ async def generators_page(request: Request, conn: sqlite3.Connection = Depends(g
     try:
         gen_repo = GeneratorRepository(conn)
         generators = gen_repo.get_all()
-        return templates.TemplateResponse("generators.html", {
-            "request": request,
-            "generators": generators
-        })
+        return templates.TemplateResponse("generators.html", template_context(
+            request,
+            generators=generators
+        ))
     except Exception as e:
         logger.error(f"Error loading generators page: {e}", exc_info=True)
-        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+        return templates.TemplateResponse("error.html", template_context(request, error=str(e)))
 
 
 @app.get("/vendors", response_class=HTMLResponse)
@@ -242,13 +414,13 @@ async def vendors_page(request: Request, conn: sqlite3.Connection = Depends(get_
     try:
         vendor_repo = VendorRepository(conn)
         vendors = vendor_repo.get_all()
-        return templates.TemplateResponse("vendors.html", {
-            "request": request,
-            "vendors": vendors
-        })
+        return templates.TemplateResponse("vendors.html", template_context(
+            request,
+            vendors=vendors
+        ))
     except Exception as e:
         logger.error(f"Error loading vendors page: {e}", exc_info=True)
-        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+        return templates.TemplateResponse("error.html", template_context(request, error=str(e)))
 
 
 @app.get("/bookings", response_class=HTMLResponse)
@@ -293,13 +465,13 @@ async def bookings_page(request: Request, conn: sqlite3.Connection = Depends(get
         # Sort vendors alphabetically
         sorted_vendors = sorted(bookings_by_vendor.items())
         
-        return templates.TemplateResponse("bookings.html", {
-            "request": request,
-            "bookings_by_vendor": sorted_vendors
-        })
+        return templates.TemplateResponse("bookings.html", template_context(
+            request,
+            bookings_by_vendor=sorted_vendors
+        ))
     except Exception as e:
         logger.error(f"Error loading bookings page: {e}", exc_info=True)
-        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+        return templates.TemplateResponse("error.html", template_context(request, error=str(e)))
 
 
 @app.get("/history", response_class=HTMLResponse)
@@ -311,7 +483,6 @@ async def history_page(request: Request, conn: sqlite3.Connection = Depends(get_
         booking_repo = BookingRepository(conn)
         gen_repo = GeneratorRepository(conn)
         events = history_repo.get_all(limit=500)
-
         generator_cache: Dict[str, Optional[int]] = {}
 
         def get_capacity(generator_id: str) -> Optional[int]:
@@ -408,23 +579,23 @@ async def history_page(request: Request, conn: sqlite3.Connection = Depends(get_
                 f"Generator(s) = {generator_list_display}\n"
                 f"Vendor = {vendor_name}"
             )
-
             history_rows.append({
                 "event_time": event.event_time,
                 "event_type": event.event_type,
+                "user": event.user or "-",
                 "vendor_name": vendor_name,
                 "generators": generator_summary,
                 "summary": event.summary or "",
                 "details_display": details_display
             })
 
-        return templates.TemplateResponse("history.html", {
-            "request": request,
-            "events": history_rows
-        })
+        return templates.TemplateResponse("history.html", template_context(
+            request,
+            events=history_rows
+        ))
     except Exception as e:
         logger.error(f"Error loading history page: {e}", exc_info=True)
-        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+        return templates.TemplateResponse("error.html", template_context(request, error=str(e)))
 
 
 @app.get("/create-booking", response_class=HTMLResponse)
@@ -440,15 +611,15 @@ async def create_booking_page(request: Request, conn: sqlite3.Connection = Depen
         # Get unique capacities
         capacities = sorted(set(g.capacity_kva for g in generators))
         
-        return templates.TemplateResponse("create_booking.html", {
-            "request": request,
-            "vendors": vendors,
-            "generators": generators,
-            "capacities": capacities
-        })
+        return templates.TemplateResponse("create_booking.html", template_context(
+            request,
+            vendors=vendors,
+            generators=generators,
+            capacities=capacities
+        ))
     except Exception as e:
         logger.error(f"Error loading create booking page: {e}", exc_info=True)
-        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+        return templates.TemplateResponse("error.html", template_context(request, error=str(e)))
 
 
 @app.get("/booking/{booking_id}", response_class=HTMLResponse)
@@ -466,10 +637,7 @@ async def booking_detail_page(request: Request, booking_id: str, conn: sqlite3.C
                 message=f"Booking '{booking_id}' not found"
             )
         except ValueError as e:
-            return templates.TemplateResponse("error.html", {
-                "request": request,
-                "error": str(e)
-            })
+            return templates.TemplateResponse("error.html", template_context(request, error=str(e)))
         
         vendor = vendor_repo.get_by_id(booking.vendor_id)
         items = booking_repo.get_items(booking_id)
@@ -483,15 +651,15 @@ async def booking_detail_page(request: Request, booking_id: str, conn: sqlite3.C
                 "generator_name": f"{gen.generator_id} ({gen.capacity_kva} kVA)" if gen else "Unknown"
             })
         
-        return templates.TemplateResponse("booking_detail.html", {
-            "request": request,
-            "booking": booking,
-            "vendor": vendor,
-            "items": items_with_gen
-        })
+        return templates.TemplateResponse("booking_detail.html", template_context(
+            request,
+            booking=booking,
+            vendor=vendor,
+            items=items_with_gen
+        ))
     except Exception as e:
         logger.error(f"Error loading booking detail: {e}", exc_info=True)
-        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+        return templates.TemplateResponse("error.html", template_context(request, error=str(e)))
 
 
 @app.get("/booking/{booking_id}/edit", response_class=HTMLResponse)
@@ -509,10 +677,7 @@ async def edit_booking_page(request: Request, booking_id: str, conn: sqlite3.Con
                 message=f"Booking '{booking_id}' not found"
             )
         except ValueError as e:
-            return templates.TemplateResponse("error.html", {
-                "request": request,
-                "error": str(e)
-            })
+            return templates.TemplateResponse("error.html", template_context(request, error=str(e)))
         
         vendor = vendor_repo.get_by_id(booking.vendor_id)
         items = booking_repo.get_items(booking_id)
@@ -528,18 +693,178 @@ async def edit_booking_page(request: Request, booking_id: str, conn: sqlite3.Con
                 "generator_name": f"{gen.generator_id} ({gen.capacity_kva} kVA)" if gen else "Unknown"
             })
         
-        return templates.TemplateResponse("edit_booking.html", {
-            "request": request,
-            "booking": booking,
-            "vendor": vendor,
-            "items": items_with_gen,
-            "generators": generators,
-            "capacities": capacities
-        })
+        return templates.TemplateResponse("edit_booking.html", template_context(
+            request,
+            booking=booking,
+            vendor=vendor,
+            items=items_with_gen,
+            generators=generators,
+            capacities=capacities
+        ))
     except Exception as e:
         logger.error(f"Error loading edit booking page: {e}", exc_info=True)
-        return templates.TemplateResponse("error.html", {"request": request, "error": str(e)})
+        return templates.TemplateResponse("error.html", template_context(request, error=str(e)))
 
+
+# ============================================================================
+# ADMIN - USER MANAGEMENT
+# ============================================================================
+
+@app.get("/admin/users", response_class=HTMLResponse)
+async def admin_users_page(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+    _: Any = Depends(require_role(ROLE_ADMIN))
+):
+    """Admin user management page."""
+    repo = UserRepository(conn)
+    users = repo.list_all()
+    message = request.query_params.get("message")
+    error = request.query_params.get("error")
+    return templates.TemplateResponse(
+        "users.html",
+        template_context(request, users=users, message=message, error=error)
+    )
+
+
+@app.post("/admin/users/create")
+async def admin_create_user(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    role: str = Form(...),
+    conn: sqlite3.Connection = Depends(get_db),
+    _: Any = Depends(require_role(ROLE_ADMIN))
+):
+    """Create a new user account."""
+    from urllib.parse import quote
+
+    username = username.strip()
+    role = role.strip().lower()
+    if not username or not password:
+        return RedirectResponse(
+            f"/admin/users?error={quote('Username and password are required')}",
+            status_code=303
+        )
+    try:
+        validate_password_length(password)
+    except ValueError as e:
+        return RedirectResponse(
+            f"/admin/users?error={quote(str(e))}",
+            status_code=303
+        )
+    if role not in ALLOWED_ROLES:
+        return RedirectResponse(
+            f"/admin/users?error={quote('Invalid role')}",
+            status_code=303
+        )
+
+    repo = UserRepository(conn)
+    if repo.get_by_username(username):
+        return RedirectResponse(
+            f"/admin/users?error={quote('Username already exists')}",
+            status_code=303
+        )
+
+    password_hash = hash_password(password)
+    repo.create_user(username, password_hash, role=role, is_active=True)
+    return RedirectResponse(
+        f"/admin/users?message={quote('User created successfully')}",
+        status_code=303
+    )
+
+
+@app.post("/admin/users/{user_id}/update")
+async def admin_update_user(
+    request: Request,
+    user_id: int,
+    role: str = Form(...),
+    is_active: Optional[str] = Form(default=None),
+    conn: sqlite3.Connection = Depends(get_db),
+    current_user: Any = Depends(require_role(ROLE_ADMIN))
+):
+    """Update a user's role or active status."""
+    from urllib.parse import quote
+
+    role = role.strip().lower()
+    if role not in ALLOWED_ROLES:
+        return RedirectResponse(
+            f"/admin/users?error={quote('Invalid role')}",
+            status_code=303
+        )
+
+    repo = UserRepository(conn)
+    user = repo.get_by_id(user_id)
+    if not user:
+        return RedirectResponse(
+            f"/admin/users?error={quote('User not found')}",
+            status_code=303
+        )
+
+    active_flag = is_active == "on"
+
+    # Prevent locking out the last active admin
+    if user.role == ROLE_ADMIN and (role != ROLE_ADMIN or not active_flag):
+        active_admins = repo.count_active_admins(ROLE_ADMIN)
+        if active_admins <= 1:
+            return RedirectResponse(
+                f"/admin/users?error={quote('Cannot remove or deactivate the last admin')}",
+                status_code=303
+            )
+
+    # Prevent self-demotion or deactivation
+    if user.id == current_user.id and (role != ROLE_ADMIN or not active_flag):
+        return RedirectResponse(
+            f"/admin/users?error={quote('You cannot remove or deactivate your own admin access')}",
+            status_code=303
+        )
+
+    repo.update_role(user_id, role)
+    repo.update_active(user_id, active_flag)
+
+    return RedirectResponse(
+        f"/admin/users?message={quote('User updated successfully')}",
+        status_code=303
+    )
+
+
+@app.post("/admin/users/{user_id}/password")
+async def admin_reset_password(
+    request: Request,
+    user_id: int,
+    new_password: str = Form(...),
+    conn: sqlite3.Connection = Depends(get_db),
+    _: Any = Depends(require_role(ROLE_ADMIN))
+):
+    """Reset a user's password."""
+    from urllib.parse import quote
+
+    if not new_password:
+        return RedirectResponse(
+            f"/admin/users?error={quote('Password cannot be empty')}",
+            status_code=303
+        )
+    try:
+        validate_password_length(new_password)
+    except ValueError as e:
+        return RedirectResponse(
+            f"/admin/users?error={quote(str(e))}",
+            status_code=303
+        )
+
+    repo = UserRepository(conn)
+    user = repo.get_by_id(user_id)
+    if not user:
+        return RedirectResponse(
+            f"/admin/users?error={quote('User not found')}",
+            status_code=303
+        )
+
+    repo.update_password(user_id, hash_password(new_password))
+    return RedirectResponse(
+        f"/admin/users?message={quote('Password updated successfully')}",
+        status_code=303
+    )
 
 # ============================================================================
 # API ENDPOINTS
@@ -705,6 +1030,7 @@ async def api_calendar_day(date: str, conn: sqlite3.Connection = Depends(get_db)
 @app.post("/api/vendors")
 async def api_create_vendor(
     request_data: CreateVendorRequest,
+    _: Any = Depends(require_role(ROLE_ADMIN)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Create a new vendor with auto-generated ID."""
@@ -744,7 +1070,9 @@ async def api_create_vendor(
 
 @app.post("/api/bookings")
 async def api_create_booking(
+    request: Request,
     request_data: CreateBookingRequest,
+    _: Any = Depends(require_role(ROLE_ADMIN, ROLE_OPERATOR)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Create a new booking with auto-generated ID and items.
@@ -769,7 +1097,7 @@ async def api_create_booking(
         service = BookingService(conn)
         # Create booking with auto-generated ID and items
         # If vendor already has overlapping dates, will merge into existing booking
-        booking_id = service.create_booking(vendor_id, items)
+        booking_id = service.create_booking(vendor_id, items, actor=get_actor(request))
         
         # Check if this was a merge or new creation
         booking_repo = BookingRepository(conn)
@@ -835,14 +1163,16 @@ async def api_booking_detail(booking_id: str, conn: sqlite3.Connection = Depends
 
 @app.post("/api/bookings/{booking_id}/cancel")
 async def api_cancel_booking(
+    request: Request,
     booking_id: str,
     reason: str = Form(default="Cancelled via web"),
+    _: Any = Depends(require_role(ROLE_ADMIN, ROLE_OPERATOR)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Cancel a booking."""
     try:
         service = BookingService(conn)
-        success, msg = service.cancel_booking(booking_id, reason)
+        success, msg = service.cancel_booking(booking_id, reason, actor=get_actor(request))
         
         if not success:
             raise HTTPException(status_code=400, detail=msg)
@@ -857,7 +1187,9 @@ async def api_cancel_booking(
 
 @app.delete("/api/bookings/{booking_id}")
 async def api_delete_booking(
+    request: Request,
     booking_id: str,
+    _: Any = Depends(require_role(ROLE_ADMIN)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Delete a booking completely."""
@@ -884,6 +1216,7 @@ async def api_delete_booking(
             event_type="booking_deleted",
             booking_id=booking_id,
             vendor_id=booking.vendor_id,
+            user=get_actor(request),
             summary="Booking deleted",
             details=encode_history_items(
                 [{"generator_id": item.generator_id, "start_dt": item.start_dt} for item in items]
@@ -900,12 +1233,14 @@ async def api_delete_booking(
 
 @app.post("/api/bookings/{booking_id}/items")
 async def api_add_booking_item(
+    request: Request,
     booking_id: str,
     generator_id: Optional[str] = Form(default=None),
     capacity_kva: Optional[int] = Form(default=None),
     start_dt: str = Form(...),
     end_dt: str = Form(...),
     remarks: str = Form(default=""),
+    _: Any = Depends(require_role(ROLE_ADMIN, ROLE_OPERATOR)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Add a new generator to an existing booking."""
@@ -928,7 +1263,8 @@ async def api_add_booking_item(
             capacity_kva=capacity_kva,
             start_dt=start_dt,
             end_dt=end_dt,
-            remarks=remarks
+            remarks=remarks,
+            actor=get_actor(request)
         )
         
         if not success:
@@ -947,8 +1283,10 @@ async def api_add_booking_item(
 
 @app.post("/api/bookings/{booking_id}/items/bulk-update")
 async def api_bulk_update_items(
+    request: Request,
     booking_id: str,
     request_data: Dict[str, Any],
+    _: Any = Depends(require_role(ROLE_ADMIN, ROLE_OPERATOR)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Update multiple booking items and remove items."""
@@ -1045,6 +1383,7 @@ async def api_bulk_update_items(
                 event_type="booking_items_updated",
                 booking_id=booking_id,
                 vendor_id=booking.vendor_id,
+                user=get_actor(request),
                 summary="Booking items updated",
                 details=encode_history_items(history_items)
             )
@@ -1058,7 +1397,10 @@ async def api_bulk_update_items(
 
 
 @app.get("/api/export")
-async def api_export(conn: sqlite3.Connection = Depends(get_db)):
+async def api_export(
+    conn: sqlite3.Connection = Depends(get_db),
+    _: Any = Depends(require_role(ROLE_ADMIN))
+):
     """Export data to CSV."""
     try:
         export_service = ExportService(conn)

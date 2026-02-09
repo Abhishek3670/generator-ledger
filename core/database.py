@@ -6,7 +6,7 @@ import sqlite3
 import logging
 from typing import Optional
 
-from config import STATUS_CONFIRMED, GEN_STATUS_ACTIVE
+from config import STATUS_CONFIRMED, GEN_STATUS_ACTIVE, OWNER_USERNAME
 
 
 class DatabaseManager:
@@ -24,6 +24,7 @@ class DatabaseManager:
                 self.db_path,
                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
             )
+            self.conn.execute("PRAGMA foreign_keys = ON")
             self.logger.info(f"Database connected | context={{'db_path': '{self.db_path}'}}")
             return self.conn
         except sqlite3.Error as e:
@@ -92,6 +93,16 @@ class DatabaseManager:
                 details TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                last_login TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS booking_id_seq (
                 booking_date TEXT PRIMARY KEY,
                 next_val INTEGER NOT NULL
@@ -119,6 +130,19 @@ class DatabaseManager:
             CREATE INDEX IF NOT EXISTS idx_booking_history_vendor
                 ON booking_history(vendor_id);
             """)
+            # Ensure booking_history has user column for audit trail
+            cur.execute("PRAGMA table_info(booking_history)")
+            existing_cols = {row[1] for row in cur.fetchall()}
+            if "user" not in existing_cols:
+                cur.execute("ALTER TABLE booking_history ADD COLUMN user TEXT")
+
+            # Backfill legacy history rows with owner when user is missing
+            owner_label = OWNER_USERNAME or "owner"
+            cur.execute(
+                "UPDATE booking_history SET user = ? WHERE user IS NULL OR user = ''",
+                (owner_label,)
+            )
+
             self.conn.commit()
             self.logger.info("Database schema initialized successfully")
         except sqlite3.Error as e:

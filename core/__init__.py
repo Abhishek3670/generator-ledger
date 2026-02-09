@@ -9,6 +9,7 @@ from .models import (
     Booking,
     BookingItem,
     BookingHistory,
+    User,
     BookingStatus,
     GeneratorStatus,
 )
@@ -18,6 +19,7 @@ from .repositories import (
     VendorRepository,
     BookingRepository,
     BookingHistoryRepository,
+    UserRepository,
 )
 from .services import (
     BookingService,
@@ -33,6 +35,7 @@ __all__ = [
     "Booking",
     "BookingItem",
     "BookingHistory",
+    "User",
     "BookingStatus",
     "GeneratorStatus",
     "DatabaseManager",
@@ -40,6 +43,7 @@ __all__ = [
     "VendorRepository",
     "BookingRepository",
     "BookingHistoryRepository",
+    "UserRepository",
     "BookingService",
     "AvailabilityChecker",
     "ExportService",

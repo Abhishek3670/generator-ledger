@@ -19,15 +19,31 @@
                 <span>Genset</span>
             </a>
             <div class="flex items-center gap-4">
-                <a href="/history" class="text-sm font-medium text-white/80 transition hover:text-white">History</a>
-                <a href="#" class="flex items-center gap-2 rounded-full border border-white/20 px-3 py-1.5 text-sm font-medium text-white/90 transition hover:border-white/40 hover:text-white">
-                    <span class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">GS</span>
-                    Login
-                </a>
+                {% if user %}
+                    <a href="/history" class="text-sm font-medium text-white/80 transition hover:text-white">History</a>
+                    {% if user.role == 'admin' %}
+                        <a href="/admin/users" class="text-sm font-medium text-white/80 transition hover:text-white">Users</a>
+                    {% endif %}
+                    <div class="flex items-center gap-2 rounded-full border border-white/20 px-3 py-1.5 text-xs font-semibold text-white/90">
+                        <span class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">
+                            {{ user.username[:2] | upper }}
+                        </span>
+                        <div class="text-left">
+                            <div class="text-xs font-semibold">{{ user.username }}</div>
+                            <div class="text-[10px] uppercase tracking-[0.2em] text-white/60">{{ user.role }}</div>
+                        </div>
+                    </div>
+                    <a href="/logout" class="text-sm font-medium text-white/80 transition hover:text-white">Logout</a>
+                {% else %}
+                    <a href="/login" class="flex items-center gap-2 rounded-full border border-white/20 px-3 py-1.5 text-sm font-medium text-white/90 transition hover:border-white/40 hover:text-white">
+                        <span class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">GS</span>
+                        Login
+                    </a>
+                {% endif %}
             </div>
         </div>
     </nav>
-    
+
     {% block content %}{% endblock %}
     
     <footer class="footer">

@@ -39,6 +39,7 @@ def log_booking_history(
     event_type: str,
     booking_id: Optional[str] = None,
     vendor_id: Optional[str] = None,
+    user: str = "",
     summary: str = "",
     details: str = ""
 ) -> None:
@@ -51,6 +52,7 @@ def log_booking_history(
             event_type=event_type,
             booking_id=booking_id,
             vendor_id=vendor_id,
+            user=user or "",
             summary=summary,
             details=details
         )
@@ -158,7 +160,8 @@ class BookingService:
         self,
         vendor_id: str,
         items: List[Dict[str, Any]],
-        booking_id: Optional[str] = None
+        booking_id: Optional[str] = None,
+        actor: Optional[str] = None
     ) -> str:
         """Create a new booking with items. Returns the generated booking ID.
         
@@ -229,6 +232,7 @@ class BookingService:
                 event_type="booking_merged",
                 booking_id=existing_booking_id,
                 vendor_id=vendor_id,
+                user=actor or "",
                 summary="Merged booking items",
                 details=encode_history_items(prepared_items)
             )
@@ -278,6 +282,7 @@ class BookingService:
             event_type="booking_created",
             booking_id=booking_id,
             vendor_id=vendor_id,
+            user=actor or "",
             summary="New booking created",
             details=encode_history_items(prepared_items)
         )
@@ -366,7 +371,8 @@ class BookingService:
         capacity_kva: Optional[int] = None,
         start_dt: Optional[str] = None,
         end_dt: Optional[str] = None,
-        remarks: str = "Added"
+        remarks: str = "Added",
+        actor: Optional[str] = None
     ) -> Tuple[bool, str]:
         """Add a generator to an existing booking."""
         if not start_dt or not end_dt:
@@ -423,6 +429,7 @@ class BookingService:
             event_type="booking_item_added",
             booking_id=booking_id,
             vendor_id=booking.vendor_id,
+            user=actor or "",
             summary="Generator added to booking",
             details=encode_history_items([{"generator_id": generator_id, "start_dt": start_dt or ""}])
         )
@@ -433,7 +440,8 @@ class BookingService:
         self,
         booking_id: str,
         new_start_dt: str,
-        new_end_dt: str
+        new_end_dt: str,
+        actor: Optional[str] = None
     ) -> Tuple[bool, str]:
         """Modify booking times for all items."""
         self.logger.info(f"Modifying booking times | context={{'booking_id': '{booking_id}'}}")
@@ -485,6 +493,7 @@ class BookingService:
             event_type="booking_times_modified",
             booking_id=booking_id,
             vendor_id=booking.vendor_id,
+            user=actor or "",
             summary="Booking times modified",
             details=encode_history_items(
                 [{"generator_id": item.generator_id, "start_dt": item.start_dt} for item in updated_items]
@@ -497,7 +506,8 @@ class BookingService:
     def cancel_booking(
         self,
         booking_id: str,
-        reason: str = "Cancelled"
+        reason: str = "Cancelled",
+        actor: Optional[str] = None
     ) -> Tuple[bool, str]:
         """Cancel a booking."""
         self.logger.info(f"Cancelling booking | context={{'booking_id': '{booking_id}', 'reason': '{reason}'}}")
@@ -525,6 +535,7 @@ class BookingService:
             event_type="booking_cancelled",
             booking_id=booking_id,
             vendor_id=booking.vendor_id,
+            user=actor or "",
             summary="Booking cancelled",
             details=encode_history_items(
                 [{"generator_id": item.generator_id, "start_dt": item.start_dt} for item in cancelled_items]

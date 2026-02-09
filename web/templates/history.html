@@ -28,6 +28,7 @@
                         <tr>
                             <th class="w-40 px-6 py-4 text-left font-semibold">Time</th>
                             <th class="w-40 px-6 py-4 text-center font-semibold">Event</th>
+                            <th class="w-32 px-6 py-4 text-left font-semibold">User</th>
                             <th class="px-6 py-4 text-left font-semibold">Vendor</th>
                             <th class="w-56 px-6 py-4 text-left font-semibold">Generators</th>
                             <th class="px-6 py-4 text-left font-semibold">Summary</th>
@@ -52,6 +53,7 @@
                                     {{ event.event_type.replace('_', ' ') | title }}
                                 </span>
                             </td>
+                            <td class="px-6 py-4 text-xs text-slate-500">{{ event.user or '-' }}</td>
                             <td class="px-6 py-4 font-semibold text-slate-900">{{ event.vendor_name or '-' }}</td>
                             <td class="w-56 px-6 py-4 whitespace-pre-line">{{ event.generators or '-' }}</td>
                             <td class="px-6 py-4">{{ event.summary or '-' }}</td>

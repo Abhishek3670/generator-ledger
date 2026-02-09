@@ -6,7 +6,7 @@ import sqlite3
 import logging
 from typing import Optional, List
 
-from .models import Generator, Vendor, Booking, BookingItem, BookingHistory, GeneratorStatus
+from .models import Generator, Vendor, Booking, BookingItem, BookingHistory, GeneratorStatus, User
 
 
 class GeneratorRepository:
@@ -314,13 +314,14 @@ class BookingHistoryRepository:
             cur = self.conn.cursor()
             cur.execute(
                 """INSERT INTO booking_history
-                (event_time, event_type, booking_id, vendor_id, summary, details)
-                VALUES (?, ?, ?, ?, ?, ?)""",
+                (event_time, event_type, booking_id, vendor_id, user, summary, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     event.event_time,
                     event.event_type,
                     event.booking_id,
                     event.vendor_id,
+                    event.user or "",
                     event.summary,
                     event.details,
                 )
@@ -338,11 +339,18 @@ class BookingHistoryRepository:
         cur = self.conn.cursor()
         if limit:
             cur.execute(
-                "SELECT * FROM booking_history ORDER BY event_time DESC, id DESC LIMIT ?",
+                """SELECT id, event_time, event_type, booking_id, vendor_id, user, summary, details
+                   FROM booking_history
+                   ORDER BY id DESC, event_time DESC
+                   LIMIT ?""",
                 (limit,)
             )
         else:
-            cur.execute("SELECT * FROM booking_history ORDER BY event_time DESC, id DESC")
+            cur.execute(
+                """SELECT id, event_time, event_type, booking_id, vendor_id, user, summary, details
+                   FROM booking_history
+                   ORDER BY id DESC, event_time DESC"""
+            )
 
         events = []
         for row in cur.fetchall():
@@ -352,7 +360,118 @@ class BookingHistoryRepository:
                 event_type=row[2],
                 booking_id=row[3],
                 vendor_id=row[4],
-                summary=row[5] or "",
-                details=row[6] or ""
+                user=row[5] or "",
+                summary=row[6] or "",
+                details=row[7] or ""
             ))
         return events
+
+
+class UserRepository:
+    """Repository for user account data access."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+    def get_by_id(self, user_id: int) -> Optional[User]:
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT id, username, password_hash, role, is_active, created_at, last_login "
+            "FROM users WHERE id = ?",
+            (user_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return User(
+            id=row[0],
+            username=row[1],
+            password_hash=row[2],
+            role=row[3],
+            is_active=bool(row[4]),
+            created_at=row[5],
+            last_login=row[6]
+        )
+
+    def get_by_username(self, username: str) -> Optional[User]:
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT id, username, password_hash, role, is_active, created_at, last_login "
+            "FROM users WHERE username = ?",
+            (username,)
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return User(
+            id=row[0],
+            username=row[1],
+            password_hash=row[2],
+            role=row[3],
+            is_active=bool(row[4]),
+            created_at=row[5],
+            last_login=row[6]
+        )
+
+    def list_all(self) -> List[User]:
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT id, username, password_hash, role, is_active, created_at, last_login "
+            "FROM users ORDER BY username"
+        )
+        users = []
+        for row in cur.fetchall():
+            users.append(User(
+                id=row[0],
+                username=row[1],
+                password_hash=row[2],
+                role=row[3],
+                is_active=bool(row[4]),
+                created_at=row[5],
+                last_login=row[6]
+            ))
+        return users
+
+    def count_users(self) -> int:
+        cur = self.conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM users")
+        return int(cur.fetchone()[0])
+
+    def count_active_admins(self, role_admin: str) -> int:
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM users WHERE role = ? AND is_active = 1",
+            (role_admin,)
+        )
+        return int(cur.fetchone()[0])
+
+    def create_user(self, username: str, password_hash: str, role: str, is_active: bool = True) -> int:
+        cur = self.conn.cursor()
+        cur.execute(
+            """INSERT INTO users (username, password_hash, role, is_active, created_at)
+               VALUES (?, ?, ?, ?, datetime('now'))""",
+            (username, password_hash, role, 1 if is_active else 0)
+        )
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    def update_role(self, user_id: int, role: str) -> None:
+        cur = self.conn.cursor()
+        cur.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+        self.conn.commit()
+
+    def update_active(self, user_id: int, is_active: bool) -> None:
+        cur = self.conn.cursor()
+        cur.execute("UPDATE users SET is_active = ? WHERE id = ?", (1 if is_active else 0, user_id))
+        self.conn.commit()
+
+    def update_password(self, user_id: int, password_hash: str) -> None:
+        cur = self.conn.cursor()
+        cur.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+        self.conn.commit()
+
+    def update_last_login(self, user_id: int) -> None:
+        cur = self.conn.cursor()
+        cur.execute("UPDATE users SET last_login = datetime('now') WHERE id = ?", (user_id,))
+        self.conn.commit()

@@ -14,6 +14,8 @@ from core import (
     ExportService,
 )
 from core.services import archive_all_bookings, create_vendor
+from config import LOAD_SEED_DATA, OWNER_USERNAME, OWNER_PASSWORD
+from core.auth import ensure_owner_user
 
 
 class CLI:
@@ -30,14 +32,21 @@ class CLI:
         """Initialize database and services."""
         self.conn = self.db_manager.connect()
         self.db_manager.init_schema()
+
+        # Ensure at least one admin user exists (non-strict in CLI)
+        ensure_owner_user(self.conn, OWNER_USERNAME, OWNER_PASSWORD, strict=False)
         
         # Load sample data
-        loader = DataLoader(self.conn)
-        loader.load_from_excel()
+        if LOAD_SEED_DATA:
+            loader = DataLoader(self.conn)
+            loader.load_from_excel()
+        else:
+            self.logger.info("Seed data load skipped (LOAD_SEED_DATA=false)")
         
         # Initialize services
         self.booking_service = BookingService(self.conn)
         self.export_service = ExportService(self.conn)
+        self.actor = "cli"
         
         self.logger.info("System initialized successfully")
         print(f"Generator Booking Ledger initialized. Database: {self.db_manager.db_path}")
@@ -226,7 +235,7 @@ class CLI:
             else:
                 print("Invalid choice. Skipping item.")
         
-        self.booking_service.create_booking(vendor_id, items)
+        self.booking_service.create_booking(vendor_id, items, actor=self.actor)
         print(f"✓ Created booking")
     
     def add_generator_interactive(self) -> None:
@@ -239,7 +248,11 @@ class CLI:
             start_dt = input("Start (YYYY-MM-DD HH:MM): ").strip()
             end_dt = input("End   (YYYY-MM-DD HH:MM): ").strip()
             success, info = self.booking_service.add_generator(
-                booking_id, generator_id=gid, start_dt=start_dt, end_dt=end_dt
+                booking_id,
+                generator_id=gid,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                actor=self.actor
             )
         elif mode == '2':
             cap_str = input('Capacity kVA: ').strip()
@@ -251,7 +264,11 @@ class CLI:
             start_dt = input("Start (YYYY-MM-DD HH:MM): ").strip()
             end_dt = input("End   (YYYY-MM-DD HH:MM): ").strip()
             success, info = self.booking_service.add_generator(
-                booking_id, capacity_kva=cap, start_dt=start_dt, end_dt=end_dt
+                booking_id,
+                capacity_kva=cap,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                actor=self.actor
             )
         else:
             print("Invalid choice")
@@ -268,7 +285,12 @@ class CLI:
         new_start = input("New Start (YYYY-MM-DD HH:MM): ").strip()
         new_end = input("New End   (YYYY-MM-DD HH:MM): ").strip()
         
-        success, msg = self.booking_service.modify_times(booking_id, new_start, new_end)
+        success, msg = self.booking_service.modify_times(
+            booking_id,
+            new_start,
+            new_end,
+            actor=self.actor
+        )
         
         if success:
             print(f'✓ {msg}')
@@ -280,7 +302,11 @@ class CLI:
         booking_id = input('Booking ID: ').strip()
         reason = input('Reason (optional): ').strip() or 'Cancelled via CLI'
         
-        success, msg = self.booking_service.cancel_booking(booking_id, reason)
+        success, msg = self.booking_service.cancel_booking(
+            booking_id,
+            reason,
+            actor=self.actor
+        )
         
         if success:
             print(f'✓ {msg}')

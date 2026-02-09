@@ -78,6 +78,19 @@ class BookingHistory:
     event_type: str
     booking_id: Optional[str] = None
     vendor_id: Optional[str] = None
+    user: str = ""
     summary: str = ""
     details: str = ""
+    id: Optional[int] = None
+
+
+@dataclass
+class User:
+    """User account data model."""
+    username: str
+    password_hash: str
+    role: str
+    is_active: bool = True
+    created_at: str = ""
+    last_login: Optional[str] = None
     id: Optional[int] = None

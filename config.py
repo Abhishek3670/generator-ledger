@@ -9,6 +9,16 @@ import sys
 
 # Database Configuration
 DB_PATH = os.getenv("DB_PATH", "ledger.db")
+LOAD_SEED_DATA = os.getenv("LOAD_SEED_DATA", "false").lower() == "true"
+
+# Auth / Session Configuration
+SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
+OWNER_USERNAME = os.getenv("OWNER_USERNAME", "").strip()
+OWNER_PASSWORD = os.getenv("OWNER_PASSWORD", "").strip()
+
+# Role Configuration
+ROLE_ADMIN = "admin"
+ROLE_OPERATOR = "operator"
 
 # Web Server Configuration
 HOST = os.getenv("HOST", "127.0.0.1")
