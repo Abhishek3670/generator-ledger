@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from core import (
+    Generator,
     DatabaseManager,
     BookingService,
     DataLoader,
@@ -76,6 +77,13 @@ class CreateVendorRequest(BaseModel):
     vendor_name: str
     vendor_place: str = "Civil Line"
     phone: str = ""
+
+
+class CreateGeneratorRequest(BaseModel):
+    capacity_kva: int
+    type: str
+    identification: str = ""
+    notes: str = ""
 
 # FastAPI app
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
@@ -399,9 +407,50 @@ async def generators_page(request: Request, conn: sqlite3.Connection = Depends(g
     try:
         gen_repo = GeneratorRepository(conn)
         generators = gen_repo.get_all()
+
+        selected_date = request.query_params.get("date")
+        if selected_date:
+            selected_date = selected_date.strip()
+        if not selected_date or selected_date.lower() == "all":
+            selected_date = None
+
+        if selected_date:
+            try:
+                datetime.strptime(selected_date, "%Y-%m-%d")
+            except ValueError:
+                return templates.TemplateResponse(
+                    "error.html",
+                    template_context(
+                        request,
+                        error="Invalid date format. Please use YYYY-MM-DD."
+                    )
+                )
+
+        booking_status = {}
+        if selected_date:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT DISTINCT bi.generator_id
+                FROM booking_items bi
+                JOIN bookings b ON bi.booking_id = b.booking_id
+                WHERE date(bi.start_dt) = ?
+                  AND bi.item_status = ?
+                  AND b.status = ?
+                """,
+                (selected_date, STATUS_CONFIRMED, STATUS_CONFIRMED)
+            )
+            booked_ids = {row[0] for row in cur.fetchall()}
+            booking_status = {
+                gen.generator_id: ("Booked" if gen.generator_id in booked_ids else "Free")
+                for gen in generators
+            }
+
         return templates.TemplateResponse("generators.html", template_context(
             request,
-            generators=generators
+            generators=generators,
+            booking_status=booking_status,
+            selected_date=selected_date or ""
         ))
     except Exception as e:
         logger.error(f"Error loading generators page: {e}", exc_info=True)
@@ -889,6 +938,166 @@ async def api_generators(conn: sqlite3.Connection = Depends(get_db)):
         ]
     except Exception as e:
         logger.error(f"Error fetching generators: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/generators/{generator_id}/bookings")
+async def api_generator_bookings(
+    generator_id: str,
+    date: Optional[str] = None,
+    conn: sqlite3.Connection = Depends(get_db)
+):
+    """Get bookings for a generator (optionally filtered by date)."""
+    try:
+        gen_repo = GeneratorRepository(conn)
+        if not gen_repo.get_by_id(generator_id):
+            raise HTTPException(status_code=404, detail="Generator not found")
+
+        if date:
+            try:
+                datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid date format (YYYY-MM-DD)")
+
+        cur = conn.cursor()
+        if date:
+            cur.execute(
+                """
+                SELECT b.booking_id,
+                       b.vendor_id,
+                       v.vendor_name,
+                       b.status,
+                       bi.start_dt,
+                       bi.end_dt,
+                       bi.item_status,
+                       bi.remarks
+                FROM booking_items bi
+                JOIN bookings b ON bi.booking_id = b.booking_id
+                LEFT JOIN vendors v ON b.vendor_id = v.vendor_id
+                WHERE bi.generator_id = ?
+                  AND date(bi.start_dt) = ?
+                ORDER BY bi.start_dt DESC
+                """,
+                (generator_id, date)
+            )
+        else:
+            cur.execute(
+                """
+                SELECT b.booking_id,
+                       b.vendor_id,
+                       v.vendor_name,
+                       b.status,
+                       bi.start_dt,
+                       bi.end_dt,
+                       bi.item_status,
+                       bi.remarks
+                FROM booking_items bi
+                JOIN bookings b ON bi.booking_id = b.booking_id
+                LEFT JOIN vendors v ON b.vendor_id = v.vendor_id
+                WHERE bi.generator_id = ?
+                ORDER BY bi.start_dt DESC
+                """,
+                (generator_id,)
+            )
+
+        bookings = []
+        for row in cur.fetchall():
+            bookings.append({
+                "booking_id": row[0],
+                "vendor_id": row[1],
+                "vendor_name": row[2] or row[1] or "-",
+                "booking_status": row[3],
+                "start_dt": row[4],
+                "end_dt": row[5],
+                "item_status": row[6],
+                "remarks": row[7] or ""
+            })
+
+        return {
+            "generator_id": generator_id,
+            "count": len(bookings),
+            "bookings": bookings
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching generator bookings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/generators")
+async def api_create_generator(
+    request_data: CreateGeneratorRequest,
+    _: Any = Depends(require_role(ROLE_ADMIN)),
+    conn: sqlite3.Connection = Depends(get_db)
+):
+    """Create a new generator with auto-generated ID."""
+    try:
+        try:
+            capacity_kva = int(request_data.capacity_kva)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Capacity (kVA) must be a number")
+
+        if capacity_kva <= 0:
+            raise HTTPException(status_code=400, detail="Capacity (kVA) must be greater than zero")
+
+        type_raw = (request_data.type or "").strip()
+        if not type_raw:
+            raise HTTPException(status_code=400, detail="Type is required")
+
+        identification_raw = (request_data.identification or "").strip()
+        notes_raw = (request_data.notes or "").strip()
+
+        def normalize_token(value: str) -> str:
+            return re.sub(r"[^A-Za-z0-9]+", "", value.upper())
+
+        type_token = normalize_token(type_raw)
+        if not type_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Type must include at least one alphanumeric character"
+            )
+
+        ident_token = normalize_token(identification_raw) if identification_raw else ""
+        parts = ["GEN", f"{capacity_kva}KVA"]
+        if ident_token:
+            parts.append(ident_token)
+        parts.append(type_token)
+
+        gen_repo = GeneratorRepository(conn)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM generators WHERE capacity_kva = ?", (capacity_kva,))
+        base_count = int(cur.fetchone()[0] or 0)
+
+        counter = base_count
+        generator_id = ""
+        while True:
+            counter += 1
+            suffix = f"{counter:02d}"
+            candidate = "-".join(parts + [suffix])
+            if not gen_repo.get_by_id(candidate):
+                generator_id = candidate
+                break
+
+        generator = Generator(
+            generator_id=generator_id,
+            capacity_kva=capacity_kva,
+            identification=identification_raw,
+            type=type_raw,
+            status=GEN_STATUS_ACTIVE,
+            notes=notes_raw
+        )
+        gen_repo.save(generator)
+        logger.info(f"Generator created | context={{'generator_id': '{generator_id}'}}")
+        return {
+            "success": True,
+            "generator_id": generator_id,
+            "message": f"Generator {generator_id} created successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating generator: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

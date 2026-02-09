@@ -9,16 +9,39 @@
                 <h1 class="mt-2 text-2xl font-semibold text-slate-900">Generators</h1>
                 <p class="mt-1 text-sm text-slate-500">Track capacity, availability, and identifiers.</p>
             </div>
+            {% if user and user.role == 'admin' %}
+            <button id="openAddGenerator" type="button" class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">
+                + Add New Generator
+            </button>
+            {% endif %}
         </div>
 
         {% if generators %}
         <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <input
-                type="text"
-                id="generatorFilter"
-                placeholder="Search by ID, Type, or Status"
-                class="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
-            >
+            <div class="flex flex-wrap items-end gap-4">
+                <div class="flex-1 min-w-[220px]">
+                    <label for="generatorFilter" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Search</label>
+                    <input
+                        type="text"
+                        id="generatorFilter"
+                        placeholder="Search by ID, Type, Status, or Booking"
+                        class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                    >
+                </div>
+                <div>
+                    <label for="bookingDateFilter" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Booked Date</label>
+                    <input
+                        type="date"
+                        id="bookingDateFilter"
+                        value="{{ selected_date }}"
+                        class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                    >
+                </div>
+                <button id="clearDateFilter" type="button" class="mt-2 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                    All
+                </button>
+            </div>
+            <p class="mt-3 text-xs text-slate-500">Booking status shows &mdash; until a date is selected.</p>
         </div>
 
         <div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -27,27 +50,50 @@
                     <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                         <tr>
                             <th class="px-6 py-4 text-left font-semibold">Generator ID</th>
-                            <th class="px-6 py-4 text-left font-semibold">Capacity (kVA)</th>
+                            <th class="px-6 py-4 text-left font-semibold">
+                                <button type="button" class="inline-flex items-center gap-2" data-sort="capacity">
+                                    <span>Capacity (kVA)</span>
+                                    <span class="text-xs text-slate-400" data-sort-indicator="capacity"></span>
+                                </button>
+                            </th>
                             <th class="px-6 py-4 text-left font-semibold">Type</th>
                             <th class="px-6 py-4 text-left font-semibold">Identification</th>
-                            <th class="px-6 py-4 text-left font-semibold">Status</th>
+                            <th class="px-6 py-4 text-left font-semibold">Operational Status</th>
+                            <th class="px-6 py-4 text-left font-semibold">
+                                <button type="button" class="inline-flex items-center gap-2" data-sort="booking">
+                                    <span>Booking Status</span>
+                                    <span class="text-xs text-slate-400" data-sort-indicator="booking"></span>
+                                </button>
+                            </th>
                             <th class="px-6 py-4 text-left font-semibold">Notes</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-100 text-slate-700" id="generatorTable">
                         {% for gen in generators %}
-                        <tr class="transition hover:bg-slate-50">
+                        <tr class="transition hover:bg-slate-50 cursor-pointer" data-generator-id="{{ gen.generator_id }}" data-capacity="{{ gen.capacity_kva }}" data-type="{{ gen.type or '' }}" data-identification="{{ gen.identification or '' }}" data-booking="{{ booking_status.get(gen.generator_id, '') if selected_date else '' }}">
                             <td class="px-6 py-4 font-semibold text-slate-900">{{ gen.generator_id }}</td>
                             <td class="px-6 py-4">{{ gen.capacity_kva }}</td>
                             <td class="px-6 py-4">{{ gen.type or '-' }}</td>
                             <td class="px-6 py-4">{{ gen.identification or '-' }}</td>
                             <td class="px-6 py-4">
+                                {% set op_status = 'Active' if gen.status == 'Active' else 'Inactive' %}
                                 <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold
-                                    {% if gen.status == 'Active' %}bg-emerald-100 text-emerald-700
-                                    {% elif gen.status == 'Maintenance' %}bg-amber-100 text-amber-700
+                                    {% if op_status == 'Active' %}bg-emerald-100 text-emerald-700
                                     {% else %}bg-rose-100 text-rose-700{% endif %}">
-                                    {{ gen.status }}
+                                    {{ op_status }}
                                 </span>
+                            </td>
+                            <td class="px-6 py-4">
+                                {% if selected_date %}
+                                    {% set booking_label = booking_status.get(gen.generator_id, 'Free') %}
+                                    <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold
+                                        {% if booking_label == 'Booked' %}bg-amber-100 text-amber-700
+                                        {% else %}bg-emerald-100 text-emerald-700{% endif %}">
+                                        {{ booking_label }}
+                                    </span>
+                                {% else %}
+                                    <span class="text-xs text-slate-400">&mdash;</span>
+                                {% endif %}
                             </td>
                             <td class="px-6 py-4">{{ gen.notes or '-' }}</td>
                         </tr>
@@ -64,6 +110,104 @@
     </div>
 </div>
 
+{% if user and user.role == 'admin' %}
+<div id="generatorOverlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
+    <div class="w-full max-w-2xl rounded-2xl bg-white shadow-xl">
+        <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inventory</div>
+                <div class="mt-1 text-lg font-semibold text-slate-900">Add New Generator</div>
+            </div>
+            <button id="closeGeneratorOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                Close
+            </button>
+        </div>
+        <form id="generatorForm" class="space-y-4 px-6 py-5">
+            <div class="grid gap-4 sm:grid-cols-2">
+                <div>
+                    <label for="genCapacity" class="text-sm font-semibold text-slate-700">Capacity (kVA) <span class="text-rose-500">*</span></label>
+                    <input id="genCapacity" type="number" min="1" required class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                </div>
+                <div>
+                    <label for="genType" class="text-sm font-semibold text-slate-700">Type <span class="text-rose-500">*</span></label>
+                    <input id="genType" type="text" required class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                </div>
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2">
+                <div>
+                    <label for="genIdentification" class="text-sm font-semibold text-slate-700">Identification (Optional)</label>
+                    <input id="genIdentification" type="text" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                </div>
+                <div>
+                    <label class="text-sm font-semibold text-slate-700">Operational Status</label>
+                    <div class="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">Active</div>
+                </div>
+            </div>
+            <div>
+                <label for="genNotes" class="text-sm font-semibold text-slate-700">Notes (Optional)</label>
+                <input id="genNotes" type="text" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+            </div>
+            <div class="flex flex-wrap justify-end gap-3 pt-2">
+                <button type="button" id="cancelGeneratorForm" class="rounded-full border border-slate-200 px-5 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">Cancel</button>
+                <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800">Save Generator</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<div id="generatorDetailOverlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
+    <div class="w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white shadow-xl">
+        <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Generator</div>
+                <div id="detailGeneratorTitle" class="mt-1 text-lg font-semibold text-slate-900"></div>
+                <div id="detailGeneratorMeta" class="mt-1 text-xs text-slate-500"></div>
+            </div>
+            <button id="closeGeneratorDetail" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                Close
+            </button>
+        </div>
+        <div class="grid gap-6 px-6 py-5 lg:grid-cols-[1.2fr_0.8fr]">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Bookings</div>
+                <div id="generatorBookingsContent" class="mt-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-sm">
+                    Loading bookings...
+                </div>
+            </div>
+            <div id="createBookingPanel" class="rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm">
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Create Booking</div>
+                {% if user and user.role in ['admin', 'operator'] %}
+                <div id="createBookingHint" class="mt-2 text-xs text-slate-500"></div>
+                <form id="createBookingForm" class="mt-4 space-y-3">
+                    <div>
+                        <label for="generatorVendorSelect" class="text-sm font-semibold text-slate-700">Vendor <span class="text-rose-500">*</span></label>
+                        <select id="generatorVendorSelect" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                            <option value="">Select a vendor</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="generatorBookingDate" class="text-sm font-semibold text-slate-700">Booked Date <span class="text-rose-500">*</span></label>
+                        <input id="generatorBookingDate" type="date" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                    </div>
+                    <div>
+                        <label for="generatorBookingRemarks" class="text-sm font-semibold text-slate-700">Remarks (Optional)</label>
+                        <input id="generatorBookingRemarks" type="text" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                    </div>
+                    <div class="flex justify-end gap-3 pt-2">
+                        <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800">
+                            Create Booking
+                        </button>
+                    </div>
+                </form>
+                {% else %}
+                <p class="mt-3 text-sm text-slate-500">You do not have permission to create bookings.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 document.getElementById('generatorFilter')?.addEventListener('keyup', function() {
     const filter = this.value.toUpperCase();
@@ -74,6 +218,434 @@ document.getElementById('generatorFilter')?.addEventListener('keyup', function()
     for (let i = 0; i < rows.length; i++) {
         const text = rows[i].textContent.toUpperCase();
         rows[i].style.display = text.includes(filter) ? '' : 'none';
+    }
+});
+
+const bookingDateFilter = document.getElementById('bookingDateFilter');
+if (bookingDateFilter) {
+    bookingDateFilter.addEventListener('change', function() {
+        const value = this.value;
+        if (value) {
+            window.location.href = `/generators?date=${value}`;
+        } else {
+            window.location.href = '/generators';
+        }
+    });
+}
+
+document.getElementById('clearDateFilter')?.addEventListener('click', function() {
+    if (bookingDateFilter) {
+        bookingDateFilter.value = '';
+    }
+    window.location.href = '/generators';
+});
+
+const generatorOverlay = document.getElementById('generatorOverlay');
+const openGeneratorOverlay = document.getElementById('openAddGenerator');
+const closeGeneratorOverlay = document.getElementById('closeGeneratorOverlay');
+const cancelGeneratorForm = document.getElementById('cancelGeneratorForm');
+const generatorForm = document.getElementById('generatorForm');
+
+function hideGeneratorOverlay() {
+    if (!generatorOverlay) return;
+    generatorOverlay.classList.add('hidden');
+    generatorOverlay.classList.remove('flex');
+}
+
+function showGeneratorOverlay() {
+    if (!generatorOverlay) return;
+    generatorOverlay.classList.remove('hidden');
+    generatorOverlay.classList.add('flex');
+}
+
+const generatorTableBody = document.getElementById('generatorTable');
+const bookingDateFilterValue = () => document.getElementById('bookingDateFilter')?.value || '';
+const generatorDetailOverlay = document.getElementById('generatorDetailOverlay');
+const closeGeneratorDetail = document.getElementById('closeGeneratorDetail');
+const detailGeneratorTitle = document.getElementById('detailGeneratorTitle');
+const detailGeneratorMeta = document.getElementById('detailGeneratorMeta');
+const generatorBookingsContent = document.getElementById('generatorBookingsContent');
+const createBookingPanel = document.getElementById('createBookingPanel');
+const createBookingHint = document.getElementById('createBookingHint');
+const createBookingForm = document.getElementById('createBookingForm');
+const generatorVendorSelect = document.getElementById('generatorVendorSelect');
+const generatorBookingDate = document.getElementById('generatorBookingDate');
+const generatorBookingRemarks = document.getElementById('generatorBookingRemarks');
+
+let cachedVendors = null;
+let activeGeneratorId = null;
+
+const sortState = {
+    capacity: 'none',
+    booking: 'none'
+};
+const sortStorageKey = 'gensetSortKey';
+const sortStorageDir = 'gensetSortDir';
+
+function updateSortIndicators() {
+    document.querySelectorAll('[data-sort-indicator]').forEach(indicator => {
+        const key = indicator.dataset.sortIndicator;
+        const state = sortState[key];
+        if (state === 'asc') {
+            indicator.innerHTML = '&uarr;';
+        } else if (state === 'desc') {
+            indicator.innerHTML = '&darr;';
+        } else {
+            indicator.innerHTML = '&uarr;';
+        }
+    });
+}
+
+function sortRows(key) {
+    if (!generatorTableBody) return;
+    const rows = Array.from(generatorTableBody.querySelectorAll('tr'));
+    const bookingRank = (value, mode) => {
+        if (mode === 'booked-first') {
+            return value === 'Booked' ? 0 : value === 'Free' ? 1 : 2;
+        }
+        if (mode === 'free-first') {
+            return value === 'Free' ? 0 : value === 'Booked' ? 1 : 2;
+        }
+        return 2;
+    };
+
+    const sorted = rows.sort((a, b) => {
+        if (!key) return 0;
+        if (key === 'capacity') {
+            const aVal = parseInt(a.dataset.capacity || '0', 10);
+            const bVal = parseInt(b.dataset.capacity || '0', 10);
+            return sortState.capacity === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        if (key === 'booking') {
+            const aStatus = a.dataset.booking || '';
+            const bStatus = b.dataset.booking || '';
+            const mode = sortState.booking === 'asc' ? 'booked-first' : 'free-first';
+            const aRank = bookingRank(aStatus, mode);
+            const bRank = bookingRank(bStatus, mode);
+            if (aRank !== bRank) return aRank - bRank;
+            return (a.dataset.capacity || '').localeCompare(b.dataset.capacity || '');
+        }
+        return 0;
+    });
+
+    sorted.forEach(row => generatorTableBody.appendChild(row));
+}
+
+document.querySelectorAll('[data-sort]').forEach(button => {
+    button.addEventListener('click', function() {
+        const key = this.dataset.sort;
+        if (!key) return;
+
+        if (key === 'capacity') {
+            sortState.capacity = sortState.capacity === 'asc' ? 'desc' : 'asc';
+            sortState.booking = 'none';
+        }
+
+        if (key === 'booking') {
+            sortState.booking = sortState.booking === 'asc' ? 'desc' : 'asc';
+            sortState.capacity = 'none';
+        }
+
+        const direction = key === 'capacity' ? sortState.capacity : sortState.booking;
+        if (direction === 'none') {
+            localStorage.removeItem(sortStorageKey);
+            localStorage.removeItem(sortStorageDir);
+        } else {
+            localStorage.setItem(sortStorageKey, key);
+            localStorage.setItem(sortStorageDir, direction);
+        }
+
+        updateSortIndicators();
+        sortRows(key);
+    });
+});
+
+const storedKey = localStorage.getItem(sortStorageKey);
+const storedDir = localStorage.getItem(sortStorageDir);
+if (storedKey === 'capacity' && (storedDir === 'asc' || storedDir === 'desc')) {
+    sortState.capacity = storedDir;
+    sortState.booking = 'none';
+    updateSortIndicators();
+    sortRows('capacity');
+} else if (storedKey === 'booking' && (storedDir === 'asc' || storedDir === 'desc')) {
+    sortState.booking = storedDir;
+    sortState.capacity = 'none';
+    updateSortIndicators();
+    sortRows('booking');
+} else {
+    updateSortIndicators();
+}
+
+openGeneratorOverlay?.addEventListener('click', showGeneratorOverlay);
+closeGeneratorOverlay?.addEventListener('click', hideGeneratorOverlay);
+cancelGeneratorForm?.addEventListener('click', hideGeneratorOverlay);
+
+generatorOverlay?.addEventListener('click', function(event) {
+    if (event.target === generatorOverlay) {
+        hideGeneratorOverlay();
+    }
+});
+
+function showGeneratorDetailOverlay() {
+    if (!generatorDetailOverlay) return;
+    generatorDetailOverlay.classList.remove('hidden');
+    generatorDetailOverlay.classList.add('flex');
+}
+
+function hideGeneratorDetailOverlay() {
+    if (!generatorDetailOverlay) return;
+    generatorDetailOverlay.classList.add('hidden');
+    generatorDetailOverlay.classList.remove('flex');
+}
+
+closeGeneratorDetail?.addEventListener('click', hideGeneratorDetailOverlay);
+
+generatorDetailOverlay?.addEventListener('click', function(event) {
+    if (event.target === generatorDetailOverlay) {
+        hideGeneratorDetailOverlay();
+    }
+});
+
+async function loadVendors() {
+    if (cachedVendors) return cachedVendors;
+    const response = await fetch('/api/vendors');
+    if (response.status === 401) {
+        window.location.href = '/login';
+        return [];
+    }
+    const data = await response.json();
+    cachedVendors = data || [];
+    return cachedVendors;
+}
+
+function renderVendorOptions(vendors) {
+    if (!generatorVendorSelect) return;
+    generatorVendorSelect.innerHTML = '<option value="">Select a vendor</option>';
+    vendors.forEach(vendor => {
+        const option = document.createElement('option');
+        option.value = vendor.id;
+        option.textContent = `${vendor.name} (${vendor.id})`;
+        generatorVendorSelect.appendChild(option);
+    });
+}
+
+function renderBookingsList(bookings, selectedDate) {
+    if (!generatorBookingsContent) return;
+    if (!bookings || bookings.length === 0) {
+        generatorBookingsContent.innerHTML = '<div class="text-sm text-slate-500">No bookings found for this generator.</div>';
+        return;
+    }
+
+    const rows = bookings.map(item => {
+        const dateLabel = item.start_dt ? item.start_dt.split(' ')[0] : '-';
+        const statusLabel = item.item_status || item.booking_status || '-';
+        const isSelectedDate = selectedDate && dateLabel === selectedDate;
+        return `
+            <tr class="border-b border-slate-100 ${isSelectedDate ? 'bg-amber-50' : ''}">
+                <td class="py-2 pr-3 text-sm font-semibold text-slate-900">${item.booking_id}</td>
+                <td class="py-2 pr-3 text-sm text-slate-700">${item.vendor_name || item.vendor_id || '-'}</td>
+                <td class="py-2 pr-3 text-sm text-slate-700">${dateLabel}</td>
+                <td class="py-2 text-sm text-slate-700">${statusLabel}</td>
+            </tr>
+        `;
+    }).join('');
+
+    const hint = selectedDate ? `<div class="mb-3 text-xs text-slate-500">Bookings on ${selectedDate} are highlighted.</div>` : '';
+    generatorBookingsContent.innerHTML = `
+        ${hint}
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-left text-sm">
+                <thead class="text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                        <th class="py-2 pr-3 font-semibold">Booking ID</th>
+                        <th class="py-2 pr-3 font-semibold">Vendor</th>
+                        <th class="py-2 pr-3 font-semibold">Date</th>
+                        <th class="py-2 font-semibold">Status</th>
+                    </tr>
+                </thead>
+                <tbody class="text-slate-700">
+                    ${rows}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+async function fetchGeneratorBookings(generatorId) {
+    const response = await fetch(`/api/generators/${encodeURIComponent(generatorId)}/bookings`);
+    if (response.status === 401) {
+        window.location.href = '/login';
+        return null;
+    }
+    if (!response.ok) {
+        return null;
+    }
+    return await response.json();
+}
+
+function configureCreateBookingPanel(status, selectedDate) {
+    if (!createBookingPanel || !createBookingHint || !generatorBookingDate) return;
+
+    if (!selectedDate) {
+        createBookingPanel.classList.add('opacity-60');
+        createBookingHint.textContent = 'Select a booked date to create a booking for this generator.';
+        generatorBookingDate.value = '';
+        generatorBookingDate.disabled = true;
+        if (generatorVendorSelect) generatorVendorSelect.disabled = true;
+        if (createBookingForm) createBookingForm.querySelector('button[type="submit"]').disabled = true;
+        return;
+    }
+
+    generatorBookingDate.value = selectedDate;
+    const isFree = status === 'Free';
+    generatorBookingDate.disabled = !isFree;
+    if (generatorVendorSelect) generatorVendorSelect.disabled = !isFree;
+    if (createBookingForm) createBookingForm.querySelector('button[type="submit"]').disabled = !isFree;
+    createBookingPanel.classList.toggle('opacity-60', !isFree);
+
+    if (status === 'Free') {
+        createBookingHint.textContent = 'Generator is free on this date. Create a booking below.';
+    } else if (status === 'Booked') {
+        createBookingHint.textContent = 'This generator is already booked on the selected date.';
+    } else {
+        createBookingHint.textContent = 'Select a booked date to determine availability.';
+    }
+}
+
+async function handleRowClick(row) {
+    const generatorId = row.dataset.generatorId;
+    if (!generatorId) return;
+    activeGeneratorId = generatorId;
+    const capacity = row.dataset.capacity || '';
+    const type = row.dataset.type || '';
+    const identification = row.dataset.identification || '';
+    const status = row.dataset.booking || '';
+    const selectedDate = bookingDateFilterValue();
+
+    if (detailGeneratorTitle) {
+        detailGeneratorTitle.textContent = generatorId;
+    }
+    if (detailGeneratorMeta) {
+        const metaParts = [];
+        if (capacity) metaParts.push(`${capacity} kVA`);
+        if (type) metaParts.push(type);
+        if (identification) metaParts.push(identification);
+        detailGeneratorMeta.textContent = metaParts.join(' • ') || '—';
+    }
+
+    showGeneratorDetailOverlay();
+    if (generatorBookingsContent) {
+        generatorBookingsContent.textContent = 'Loading bookings...';
+    }
+
+    configureCreateBookingPanel(status, selectedDate);
+
+    try {
+        const [bookingData, vendors] = await Promise.all([
+            fetchGeneratorBookings(generatorId),
+            loadVendors()
+        ]);
+        if (vendors) renderVendorOptions(vendors);
+
+        if (bookingData && bookingData.bookings) {
+            renderBookingsList(bookingData.bookings, selectedDate);
+        } else {
+            renderBookingsList([], selectedDate);
+        }
+    } catch (error) {
+        if (generatorBookingsContent) {
+            generatorBookingsContent.textContent = 'Unable to load bookings.';
+        }
+    }
+}
+
+if (generatorTableBody) {
+    generatorTableBody.querySelectorAll('tr').forEach(row => {
+        row.addEventListener('click', () => handleRowClick(row));
+    });
+}
+
+generatorForm?.addEventListener('submit', async function(event) {
+    event.preventDefault();
+
+    const capacity = document.getElementById('genCapacity')?.value;
+    const type = document.getElementById('genType')?.value;
+    const identification = document.getElementById('genIdentification')?.value || '';
+    const notes = document.getElementById('genNotes')?.value || '';
+
+    if (!capacity || !type) {
+        alert('Capacity (kVA) and Type are required.');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/generators', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                capacity_kva: parseInt(capacity, 10),
+                type: type,
+                identification: identification,
+                notes: notes
+            })
+        });
+
+        const data = await response.json();
+        if (response.ok) {
+            alert(`Generator created: ${data.generator_id}`);
+            window.location.reload();
+        } else if (response.status === 401) {
+            window.location.href = '/login';
+        } else {
+            alert(`Error creating generator: ${data.detail || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`Error creating generator: ${error}`);
+    }
+});
+
+createBookingForm?.addEventListener('submit', async function(event) {
+    event.preventDefault();
+    if (!activeGeneratorId) return;
+
+    const vendorId = generatorVendorSelect?.value;
+    const dateValue = generatorBookingDate?.value;
+    const remarks = generatorBookingRemarks?.value || '';
+
+    if (!vendorId || !dateValue) {
+        alert('Vendor and booked date are required.');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/bookings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                vendor_id: vendorId,
+                items: [{
+                    generator_id: activeGeneratorId,
+                    date: dateValue,
+                    remarks: remarks
+                }]
+            })
+        });
+
+        const data = await response.json();
+        if (response.ok) {
+            alert(`Booking created: ${data.booking_id}`);
+            window.location.reload();
+        } else if (response.status === 401) {
+            window.location.href = '/login';
+        } else {
+            alert(`Error creating booking: ${data.detail || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`Error creating booking: ${error}`);
     }
 });
 </script>
