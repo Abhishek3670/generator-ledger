@@ -56,6 +56,13 @@
                     <input type="hidden" id="vendor_id" name="vendor_id" value="">
                     <p class="mt-2 text-xs text-slate-500">Start typing a vendor name or ID to autocomplete.</p>
                 </div>
+
+                <div id="vendorBookingsPanel" class="mt-5 hidden rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Existing Bookings for Selected Vendor</div>
+                    <div id="vendorBookingsContent" class="mt-3 text-sm text-slate-600">
+                        Select a valid vendor to view existing bookings.
+                    </div>
+                </div>
             </section>
 
             <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -168,6 +175,27 @@ document.addEventListener('DOMContentLoaded', function() {
     const overlayViewDetails = document.getElementById('overlayViewDetails');
     const closeBookingOverlay = document.getElementById('closeBookingOverlay');
     const overlayDone = document.getElementById('overlayDone');
+    const vendorBookingsPanel = document.getElementById('vendorBookingsPanel');
+    const vendorBookingsContent = document.getElementById('vendorBookingsContent');
+
+    let bookingsAbortController = null;
+    let lastResolvedVendorId = '';
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function getStatusBadgeClass(status) {
+        if (status === 'Confirmed') return 'bg-emerald-100 text-emerald-700';
+        if (status === 'Pending') return 'bg-amber-100 text-amber-700';
+        if (status === 'Cancelled') return 'bg-rose-100 text-rose-700';
+        return 'bg-slate-100 text-slate-700';
+    }
 
     function setCapacityButtonState(button, selected) {
         button.classList.remove(...capacitySelectedClasses, ...capacityUnselectedClasses);
@@ -234,6 +262,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     vendorSearchInput.value = `${vendor.name} (${vendor.id})`;
                     vendorIdInput.value = vendor.id;
                     hideVendorDropdown();
+                    loadVendorBookings(vendor.id);
                 });
                 vendorDropdownList.appendChild(button);
             });
@@ -245,6 +274,192 @@ document.addEventListener('DOMContentLoaded', function() {
     function hideVendorDropdown() {
         if (!vendorDropdown) return;
         vendorDropdown.classList.add('hidden');
+    }
+
+    function hideVendorBookingsPanel() {
+        if (!vendorBookingsPanel) return;
+        vendorBookingsPanel.classList.add('hidden');
+    }
+
+    function showVendorBookingsPanel() {
+        if (!vendorBookingsPanel) return;
+        vendorBookingsPanel.classList.remove('hidden');
+    }
+
+    function renderVendorBookingsPrompt() {
+        if (!vendorBookingsContent) return;
+        vendorBookingsContent.innerHTML = `
+            <div class="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-500">
+                Select a valid vendor to view existing bookings.
+            </div>
+        `;
+    }
+
+    function renderVendorBookingsLoading() {
+        if (!vendorBookingsContent) return;
+        showVendorBookingsPanel();
+        vendorBookingsContent.innerHTML = `
+            <div class="rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
+                Loading existing bookings...
+            </div>
+        `;
+    }
+
+    function renderVendorBookingsError(message) {
+        if (!vendorBookingsContent) return;
+        showVendorBookingsPanel();
+        vendorBookingsContent.innerHTML = `
+            <div class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700">
+                ${escapeHtml(message)}
+            </div>
+        `;
+    }
+
+    function renderVendorBookings(payload) {
+        if (!vendorBookingsContent) return;
+        showVendorBookingsPanel();
+
+        const vendorName = payload.vendor_name || payload.vendor_id || '-';
+        const bookings = payload.bookings || [];
+        const rows = [];
+
+        bookings.forEach((booking) => {
+            const bookingStatus = booking.status || '-';
+            (booking.items || []).forEach((item) => {
+                rows.push({
+                    booking_id: booking.booking_id || '-',
+                    generator_id: item.generator_id || '-',
+                    capacity: item.capacity_kva == null ? '-' : `${item.capacity_kva} kVA`,
+                    booking_date: item.start_dt ? item.start_dt.split(' ')[0] : '-',
+                    status: bookingStatus,
+                });
+            });
+        });
+
+        rows.sort((a, b) => {
+            const aTs = Date.parse(a.booking_date);
+            const bTs = Date.parse(b.booking_date);
+            const aValid = !Number.isNaN(aTs);
+            const bValid = !Number.isNaN(bTs);
+
+            if (aValid && bValid) {
+                if (aTs !== bTs) {
+                    return aTs - bTs;
+                }
+            } else if (aValid !== bValid) {
+                return aValid ? -1 : 1;
+            }
+
+            return a.booking_id.localeCompare(b.booking_id);
+        });
+
+        if (rows.length === 0) {
+            vendorBookingsContent.innerHTML = `
+                <div class="rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-600">
+                    No existing genset rows found for <span class="font-semibold text-slate-900">${escapeHtml(vendorName)}</span>.
+                </div>
+            `;
+            return;
+        }
+
+        const tableRows = rows.map((row) => `
+            <tr class="border-b border-slate-100 last:border-b-0">
+                <td class="px-3 py-2 font-semibold text-slate-900">${escapeHtml(row.booking_id)}</td>
+                <td class="px-3 py-2">${escapeHtml(row.generator_id)}</td>
+                <td class="px-3 py-2">${escapeHtml(row.capacity)}</td>
+                <td class="px-3 py-2">${escapeHtml(row.booking_date)}</td>
+                <td class="px-3 py-2">
+                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${getStatusBadgeClass(row.status)}">
+                        ${escapeHtml(row.status)}
+                    </span>
+                </td>
+            </tr>
+        `).join('');
+
+        vendorBookingsContent.innerHTML = `
+            <div class="rounded-lg border border-slate-200 bg-white">
+                <div class="border-b border-slate-200 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                    ${escapeHtml(vendorName)} (${escapeHtml(payload.vendor_id || '-')})
+                </div>
+                <div class="max-h-[34vh] overflow-auto sm:max-h-[42vh] lg:max-h-[50vh]">
+                    <table class="min-w-full text-xs text-slate-700">
+                        <thead class="sticky top-0 bg-slate-50 text-slate-500">
+                            <tr>
+                                <th class="px-3 py-2 text-left font-semibold">Booking ID</th>
+                                <th class="px-3 py-2 text-left font-semibold">Generator ID</th>
+                                <th class="px-3 py-2 text-left font-semibold">Capacity</th>
+                                <th class="px-3 py-2 text-left font-semibold">Date of Booking</th>
+                                <th class="px-3 py-2 text-left font-semibold">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+
+    async function loadVendorBookings(vendorId) {
+        const normalizedVendorId = (vendorId || '').trim();
+        if (!normalizedVendorId) {
+            lastResolvedVendorId = '';
+            if (bookingsAbortController) {
+                bookingsAbortController.abort();
+                bookingsAbortController = null;
+            }
+            renderVendorBookingsPrompt();
+            hideVendorBookingsPanel();
+            return;
+        }
+
+        if (normalizedVendorId === lastResolvedVendorId) {
+            return;
+        }
+        lastResolvedVendorId = normalizedVendorId;
+
+        if (bookingsAbortController) {
+            bookingsAbortController.abort();
+        }
+        bookingsAbortController = new AbortController();
+        const currentSignal = bookingsAbortController.signal;
+
+        renderVendorBookingsLoading();
+
+        try {
+            const response = await fetch(
+                `/api/vendors/${encodeURIComponent(normalizedVendorId)}/bookings`,
+                { signal: currentSignal }
+            );
+
+            if (response.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+
+            let payload = {};
+            try {
+                payload = await response.json();
+            } catch (_error) {
+                payload = {};
+            }
+
+            if (!response.ok) {
+                renderVendorBookingsError(payload.detail || 'Unable to load vendor bookings.');
+                return;
+            }
+
+            if (currentSignal.aborted) {
+                return;
+            }
+            renderVendorBookings(payload);
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                return;
+            }
+            renderVendorBookingsError('Unable to load vendor bookings.');
+        }
     }
 
     function hideBookingOverlay() {
@@ -301,12 +516,14 @@ document.addEventListener('DOMContentLoaded', function() {
         vendorSearchInput.addEventListener('input', function() {
             syncVendorId();
             renderVendorDropdown(this.value);
+            loadVendorBookings(vendorIdInput ? vendorIdInput.value : '');
         });
         vendorSearchInput.addEventListener('focus', function() {
             renderVendorDropdown(this.value);
         });
         vendorSearchInput.addEventListener('blur', function() {
             syncVendorId();
+            loadVendorBookings(vendorIdInput ? vendorIdInput.value : '');
             setTimeout(hideVendorDropdown, 150);
         });
     }
@@ -512,6 +729,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    renderVendorBookingsPrompt();
+    hideVendorBookingsPanel();
     updateAssignStyles();
 });
 </script>

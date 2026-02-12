@@ -66,6 +66,8 @@ from config import (
     APP_TITLE,
     APP_VERSION,
     STATUS_CONFIRMED,
+    STATUS_PENDING,
+    STATUS_CANCELLED,
     GEN_STATUS_ACTIVE,
     GEN_STATUS_INACTIVE,
 )
@@ -1441,6 +1443,110 @@ async def api_vendors(conn: sqlite3.Connection = Depends(get_db)):
         ]
     except Exception as e:
         logger.error(f"Error fetching vendors: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/vendors/{vendor_id}/bookings")
+async def api_vendor_bookings(vendor_id: str, conn: sqlite3.Connection = Depends(get_db)):
+    """Get all bookings (all statuses) for a specific vendor."""
+    try:
+        vendor_repo = VendorRepository(conn)
+        vendor = vendor_repo.get_by_id(vendor_id)
+        if not vendor:
+            logger.warning(f"Vendor bookings lookup failed | context={{'vendor_id': '{vendor_id}', 'reason': 'not found'}}")
+            raise HTTPException(status_code=404, detail="Vendor not found")
+
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT b.booking_id,
+                   b.status,
+                   b.created_at,
+                   bi.id,
+                   bi.generator_id,
+                   g.capacity_kva,
+                   bi.start_dt,
+                   bi.end_dt,
+                   bi.item_status,
+                   bi.remarks
+            FROM bookings b
+            LEFT JOIN booking_items bi ON bi.booking_id = b.booking_id
+            LEFT JOIN generators g ON g.generator_id = bi.generator_id
+            WHERE b.vendor_id = ?
+            ORDER BY b.created_at DESC, b.booking_id DESC, bi.start_dt ASC, bi.id ASC
+            """,
+            (vendor_id,),
+        )
+
+        status_counts: Dict[str, int] = {
+            STATUS_CONFIRMED: 0,
+            STATUS_PENDING: 0,
+            STATUS_CANCELLED: 0,
+        }
+        booking_map: Dict[str, Dict[str, Any]] = {}
+
+        for row in cur.fetchall():
+            booking_id = row[0]
+            booking_status = row[1] or STATUS_PENDING
+            created_at = row[2] or ""
+            item_id = row[3]
+            generator_id = row[4]
+            capacity_kva = row[5]
+            start_dt = row[6]
+            end_dt = row[7]
+            item_status = row[8]
+            remarks = row[9] or ""
+
+            if booking_id not in booking_map:
+                booking_map[booking_id] = {
+                    "booking_id": booking_id,
+                    "status": booking_status,
+                    "created_at": created_at,
+                    "item_count": 0,
+                    "booked_dates": set(),
+                    "items": [],
+                }
+                status_counts[booking_status] = status_counts.get(booking_status, 0) + 1
+
+            if item_id is None:
+                continue
+
+            date_part = start_dt.split()[0] if start_dt else ""
+            if date_part:
+                booking_map[booking_id]["booked_dates"].add(date_part)
+
+            booking_map[booking_id]["items"].append(
+                {
+                    "id": item_id,
+                    "generator_id": generator_id,
+                    "capacity_kva": capacity_kva,
+                    "start_dt": start_dt,
+                    "end_dt": end_dt,
+                    "item_status": item_status,
+                    "remarks": remarks,
+                }
+            )
+
+        bookings = []
+        for booking in booking_map.values():
+            booking["booked_dates"] = sorted(booking["booked_dates"])
+            booking["item_count"] = len(booking["items"])
+            bookings.append(booking)
+
+        logger.info(
+            f"Vendor bookings fetched | context={{'vendor_id': '{vendor_id}', 'count': {len(bookings)}}}"
+        )
+        return {
+            "vendor_id": vendor.vendor_id,
+            "vendor_name": vendor.vendor_name,
+            "total_bookings": len(bookings),
+            "status_counts": status_counts,
+            "bookings": bookings,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching vendor bookings: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
