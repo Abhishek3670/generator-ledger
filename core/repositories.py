@@ -6,7 +6,16 @@ import sqlite3
 import logging
 from typing import Optional, List
 
-from .models import Generator, Vendor, Booking, BookingItem, BookingHistory, GeneratorStatus, User
+from .models import (
+    Generator,
+    Vendor,
+    Booking,
+    BookingItem,
+    BookingHistory,
+    GeneratorStatus,
+    User,
+    UserSession,
+)
 
 
 class GeneratorRepository:
@@ -474,4 +483,104 @@ class UserRepository:
     def update_last_login(self, user_id: int) -> None:
         cur = self.conn.cursor()
         cur.execute("UPDATE users SET last_login = datetime('now') WHERE id = ?", (user_id,))
+        self.conn.commit()
+
+
+class SessionRepository:
+    """Repository for server-side session storage."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+    def create(
+        self,
+        session_id: str,
+        user_id: int,
+        csrf_token: str,
+        created_at: int,
+        expires_at: int,
+        ip_address: str = "",
+        user_agent: str = "",
+    ) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            """INSERT INTO sessions
+               (session_id, user_id, csrf_token, created_at, expires_at, last_seen, ip_address, user_agent)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (session_id, user_id, csrf_token, created_at, expires_at, created_at, ip_address, user_agent),
+        )
+        self.conn.commit()
+
+    def get_by_id(self, session_id: str) -> Optional[UserSession]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """SELECT session_id, user_id, csrf_token, created_at, expires_at, last_seen, ip_address, user_agent
+               FROM sessions WHERE session_id = ?""",
+            (session_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return UserSession(
+            session_id=row[0],
+            user_id=row[1],
+            csrf_token=row[2],
+            created_at=row[3],
+            expires_at=row[4],
+            last_seen=row[5],
+            ip_address=row[6] or "",
+            user_agent=row[7] or "",
+        )
+
+    def update_last_seen(self, session_id: str, last_seen: int) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE sessions SET last_seen = ? WHERE session_id = ?",
+            (last_seen, session_id),
+        )
+        self.conn.commit()
+
+    def delete(self, session_id: str) -> None:
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        self.conn.commit()
+
+    def delete_expired(self, now_ts: int) -> None:
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM sessions WHERE expires_at <= ?", (now_ts,))
+        self.conn.commit()
+
+
+class RevokedTokenRepository:
+    """Repository for revoked JWT tracking."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+    def revoke(self, jti: str, expires_at: int) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            "INSERT OR REPLACE INTO revoked_tokens (jti, expires_at) VALUES (?, ?)",
+            (jti, expires_at),
+        )
+        self.conn.commit()
+
+    def is_revoked(self, jti: str, now_ts: int) -> bool:
+        cur = self.conn.cursor()
+        cur.execute("SELECT expires_at FROM revoked_tokens WHERE jti = ?", (jti,))
+        row = cur.fetchone()
+        if not row:
+            return False
+        expires_at = int(row[0])
+        if expires_at <= now_ts:
+            cur.execute("DELETE FROM revoked_tokens WHERE jti = ?", (jti,))
+            self.conn.commit()
+            return False
+        return True
+
+    def delete_expired(self, now_ts: int) -> None:
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM revoked_tokens WHERE expires_at <= ?", (now_ts,))
         self.conn.commit()

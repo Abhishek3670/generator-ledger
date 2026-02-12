@@ -103,6 +103,23 @@ class DatabaseManager:
                 last_login TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                csrf_token TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                last_seen INTEGER,
+                ip_address TEXT,
+                user_agent TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS revoked_tokens (
+                jti TEXT PRIMARY KEY,
+                expires_at INTEGER NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS booking_id_seq (
                 booking_date TEXT PRIMARY KEY,
                 next_val INTEGER NOT NULL
@@ -129,6 +146,15 @@ class DatabaseManager:
 
             CREATE INDEX IF NOT EXISTS idx_booking_history_vendor
                 ON booking_history(vendor_id);
+
+            CREATE INDEX IF NOT EXISTS idx_sessions_user_id
+                ON sessions(user_id);
+
+            CREATE INDEX IF NOT EXISTS idx_sessions_expires_at
+                ON sessions(expires_at);
+
+            CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires_at
+                ON revoked_tokens(expires_at);
             """)
             # Ensure booking_history has user column for audit trail
             cur.execute("PRAGMA table_info(booking_history)")

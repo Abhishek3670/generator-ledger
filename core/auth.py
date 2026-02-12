@@ -3,7 +3,11 @@ Authentication helpers for the Generator Booking Ledger.
 """
 
 import logging
-from typing import Optional
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Tuple, Dict, Any
+
+import jwt
 
 from passlib.context import CryptContext
 
@@ -68,3 +72,48 @@ def ensure_owner_user(
     repo.create_user(username, password_hash, role=ROLE_ADMIN, is_active=True)
     logger.info("Created initial owner admin user | context={'username': '%s'}", username)
     return True
+
+
+def generate_session_id() -> str:
+    """Generate a random session identifier."""
+    return secrets.token_urlsafe(32)
+
+
+def generate_csrf_token() -> str:
+    """Generate a random CSRF token."""
+    return secrets.token_urlsafe(32)
+
+
+def create_access_token(
+    user_id: int,
+    username: str,
+    role: str,
+    secret: str,
+    algorithm: str,
+    expires_minutes: int,
+) -> Tuple[str, int, str]:
+    """Create a signed JWT access token with expiry."""
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(minutes=expires_minutes)
+    jti = secrets.token_urlsafe(16)
+    payload = {
+        "sub": str(user_id),
+        "username": username,
+        "role": role,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+        "jti": jti,
+    }
+    token = jwt.encode(payload, secret, algorithm=algorithm)
+    return token, int(exp.timestamp()), jti
+
+
+def decode_access_token(
+    token: str,
+    secret: str,
+    algorithm: str,
+    verify_exp: bool = True,
+) -> Dict[str, Any]:
+    """Decode and validate a JWT access token."""
+    options = {"verify_exp": verify_exp}
+    return jwt.decode(token, secret, algorithms=[algorithm], options=options)

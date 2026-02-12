@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Generator Booking Ledger</title>
     <link rel="stylesheet" href="/static/css/styles.css">
+    <meta name="csrf-token" content="{{ csrf_token or '' }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -37,7 +38,7 @@
                             {% if user.role == 'admin' %}
                             <a href="/admin/users" class="block px-4 py-2 hover:bg-slate-100 {{ 'text-slate-900 font-semibold' if current_path.startswith('/admin/users') else 'text-slate-700' }}">Users</a>
                             {% endif %}
-                            <a href="/logout" class="block px-4 py-2 hover:bg-slate-100 text-slate-700">Logout</a>
+                            <a href="/logout?csrf_token={{ csrf_token }}" class="block px-4 py-2 hover:bg-slate-100 text-slate-700">Logout</a>
                         </div>
                     </div>
                 {% else %}
@@ -56,6 +57,26 @@
         <p>&copy; 2026 Generator Booking Ledger v2.0</p>
     </footer>
     
+    <script>
+        (function() {
+            const meta = document.querySelector('meta[name="csrf-token"]');
+            const csrfToken = meta ? meta.getAttribute('content') : '';
+            if (!csrfToken) return;
+            const originalFetch = window.fetch;
+            window.fetch = function(input, init) {
+                const options = init || {};
+                const method = (options.method || (input && input.method) || 'GET').toUpperCase();
+                if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+                    const headers = new Headers(options.headers || {});
+                    if (!headers.has('X-CSRF-Token')) {
+                        headers.set('X-CSRF-Token', csrfToken);
+                    }
+                    options.headers = headers;
+                }
+                return originalFetch(input, options);
+            };
+        })();
+    </script>
     <script>
         (function() {
             const button = document.getElementById('userMenuButton');

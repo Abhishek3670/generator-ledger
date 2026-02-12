@@ -15,6 +15,12 @@ LOAD_SEED_DATA = os.getenv("LOAD_SEED_DATA", "false").lower() == "true"
 SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "").strip()
 OWNER_PASSWORD = os.getenv("OWNER_PASSWORD", "").strip()
+SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "gbl_session").strip()
+SESSION_TTL_MINUTES = int(os.getenv("SESSION_TTL_MINUTES", "480"))
+JWT_SECRET = (os.getenv("JWT_SECRET", "").strip() or SESSION_SECRET)
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256").strip()
+JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "15"))
+CSRF_HEADER_NAME = os.getenv("CSRF_HEADER_NAME", "X-CSRF-Token").strip()
 
 # Role Configuration
 ROLE_ADMIN = "admin"

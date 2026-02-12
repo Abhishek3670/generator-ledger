@@ -94,3 +94,16 @@ class User:
     created_at: str = ""
     last_login: Optional[str] = None
     id: Optional[int] = None
+
+
+@dataclass
+class UserSession:
+    """Server-side session data model."""
+    session_id: str
+    user_id: int
+    csrf_token: str
+    created_at: int
+    expires_at: int
+    last_seen: Optional[int] = None
+    ip_address: str = ""
+    user_agent: str = ""

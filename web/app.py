@@ -10,11 +10,11 @@ from fastapi.exceptions import RequestValidationError
 import os
 import sqlite3
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import logging
 import re
 from pydantic import BaseModel
-from starlette.middleware.sessions import SessionMiddleware
+import jwt
 
 from core import (
     Generator,
@@ -29,6 +29,7 @@ from core import (
     BookingHistoryRepository,
     UserRepository,
 )
+from core.repositories import SessionRepository, RevokedTokenRepository
 from core.utils import transaction
 from core.validation import ensure_booking
 from core.services import create_vendor, archive_all_bookings, log_booking_history, encode_history_items
@@ -37,6 +38,10 @@ from core.auth import (
     verify_password,
     ensure_owner_user,
     validate_password_length,
+    generate_session_id,
+    generate_csrf_token,
+    create_access_token,
+    decode_access_token,
 )
 
 # Initialize logging
@@ -48,6 +53,12 @@ from config import (
     DEBUG,
     LOAD_SEED_DATA,
     SESSION_SECRET,
+    SESSION_COOKIE_NAME,
+    SESSION_TTL_MINUTES,
+    JWT_SECRET,
+    JWT_ALGORITHM,
+    JWT_EXPIRE_MINUTES,
+    CSRF_HEADER_NAME,
     OWNER_USERNAME,
     OWNER_PASSWORD,
     ROLE_ADMIN,
@@ -87,14 +98,22 @@ class CreateGeneratorRequest(BaseModel):
     notes: str = ""
     status: Optional[str] = GEN_STATUS_ACTIVE
 
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
 # FastAPI app
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
 
 if not SESSION_SECRET:
     raise RuntimeError("SESSION_SECRET must be set for production authentication")
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET must be set for API authentication")
 
 PUBLIC_PATHS = {
     "/login",
+    "/api/login",
     "/health",
     "/api/info",
     "/docs",
@@ -103,6 +122,11 @@ PUBLIC_PATHS = {
     "/openapi.json",
 }
 PUBLIC_PREFIXES = ("/static",)
+CSRF_EXEMPT_PATHS = {
+    "/login",
+    "/api/login",
+    "/health",
+}
 ALLOWED_ROLES = {ROLE_ADMIN, ROLE_OPERATOR}
 
 # Exception handler for validation errors
@@ -123,7 +147,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """Return JSON for API errors and HTML for page errors."""
-    if request.url.path.startswith("/api"):
+    if is_api_request(request):
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
     return templates.TemplateResponse(
         "error.html",
@@ -142,9 +166,152 @@ templates = Jinja2Templates(directory=template_dir)
 
 def template_context(request: Request, **kwargs: Any) -> Dict[str, Any]:
     """Standard template context with user attached."""
-    context = {"request": request, "user": getattr(request.state, "user", None)}
+    context = {
+        "request": request,
+        "user": getattr(request.state, "user", None),
+        "csrf_token": getattr(request.state, "csrf_token", None),
+    }
     context.update(kwargs)
     return context
+
+
+def now_ts() -> int:
+    """Return current UTC timestamp in seconds."""
+    return int(datetime.utcnow().timestamp())
+
+
+def is_api_request(request: Request) -> bool:
+    """Determine whether this request expects JSON responses."""
+    if request.url.path.startswith("/api"):
+        return True
+    accept = request.headers.get("accept", "")
+    if "application/json" in accept:
+        return True
+    if request.headers.get("x-requested-with", "").lower() == "xmlhttprequest":
+        return True
+    return False
+
+
+def unauthorized_response(request: Request, detail: str = "Unauthorized") -> JSONResponse | RedirectResponse:
+    if is_api_request(request):
+        return JSONResponse(status_code=401, content={"detail": detail})
+    return RedirectResponse("/login", status_code=303)
+
+
+def forbidden_response(request: Request, detail: str = "Forbidden") -> JSONResponse | HTMLResponse:
+    if is_api_request(request):
+        return JSONResponse(status_code=403, content={"detail": detail})
+    return templates.TemplateResponse(
+        "error.html",
+        template_context(request, error=detail),
+        status_code=403,
+    )
+
+
+def get_bearer_token(request: Request) -> Optional[str]:
+    """Extract bearer token from Authorization header."""
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header:
+        return None
+    parts = auth_header.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    return parts[1].strip() or None
+
+
+async def validate_csrf(request: Request, expected_token: str) -> bool:
+    """Validate CSRF token from header or form body."""
+    header_token = (
+        request.headers.get(CSRF_HEADER_NAME)
+        or request.headers.get("x-csrf-token")
+        or request.headers.get("x-csrftoken")
+    )
+    if header_token and header_token == expected_token:
+        return True
+
+    if request.method == "GET":
+        query_token = request.query_params.get("csrf_token")
+        return bool(query_token and query_token == expected_token)
+
+    content_type = request.headers.get("content-type", "").lower()
+    if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+        form = await request.form()
+        form_token = form.get("csrf_token")
+        return bool(form_token and form_token == expected_token)
+    return False
+
+
+def requires_csrf(request: Request) -> bool:
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        return True
+    if request.method == "GET" and request.url.path == "/logout":
+        return True
+    return False
+
+
+def authenticate_credentials(
+    conn: sqlite3.Connection,
+    username: Optional[str],
+    password: Optional[str],
+) -> Optional["User"]:
+    if not username or not password:
+        return None
+    repo = UserRepository(conn)
+    try:
+        validate_password_length(password)
+    except ValueError:
+        return None
+    user = repo.get_by_username(username.strip())
+    if not user or not user.is_active:
+        return None
+    if not verify_password(password, user.password_hash):
+        return None
+    return user
+
+
+def create_session(
+    conn: sqlite3.Connection,
+    user_id: int,
+    request: Request,
+) -> Tuple[str, str, int]:
+    session_id = generate_session_id()
+    csrf_token = generate_csrf_token()
+    created_at = now_ts()
+    expires_at = created_at + (SESSION_TTL_MINUTES * 60)
+    repo = SessionRepository(conn)
+    repo.create(
+        session_id=session_id,
+        user_id=user_id,
+        csrf_token=csrf_token,
+        created_at=created_at,
+        expires_at=expires_at,
+        ip_address=request.client.host if request.client else "",
+        user_agent=request.headers.get("user-agent", ""),
+    )
+    return session_id, csrf_token, expires_at
+
+
+def set_session_cookie(response: RedirectResponse, session_id: str, expires_at: int) -> None:
+    max_age = max(0, expires_at - now_ts())
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=session_id,
+        max_age=max_age,
+        httponly=True,
+        secure=not DEBUG,
+        samesite="lax",
+        path="/",
+    )
+
+
+def clear_session_cookie(response: RedirectResponse | JSONResponse | HTMLResponse) -> None:
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=not DEBUG,
+        samesite="lax",
+    )
 
 
 async def get_db(request: Request):
@@ -200,6 +367,7 @@ def get_actor(request: Request) -> str:
 async def db_auth_middleware(request: Request, call_next):
     """Attach DB connection and enforce authentication for protected routes."""
     conn: Optional[sqlite3.Connection] = None
+    clear_cookie = False
     try:
         conn = sqlite3.connect(
             DB_PATH,
@@ -207,38 +375,100 @@ async def db_auth_middleware(request: Request, call_next):
         )
         conn.execute("PRAGMA foreign_keys = ON")
         request.state.db = conn
+        request.state.user = None
+        request.state.auth_type = None
+        request.state.csrf_token = None
+        request.state.session_id = None
 
         path = request.url.path
-        if path in PUBLIC_PATHS or any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES):
-            return await call_next(request)
+        is_public = path in PUBLIC_PATHS or any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES)
 
-        user_id = request.session.get("user_id")
-        if not user_id:
-            if path.startswith("/api"):
-                return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-            return RedirectResponse("/login", status_code=303)
+        auth_header = request.headers.get("authorization")
+        if auth_header:
+            token = get_bearer_token(request)
+            if not token:
+                return unauthorized_response(request)
+            try:
+                payload = decode_access_token(token, JWT_SECRET, JWT_ALGORITHM, verify_exp=True)
+            except jwt.ExpiredSignatureError:
+                return unauthorized_response(request, detail="Token expired")
+            except jwt.PyJWTError:
+                return unauthorized_response(request, detail="Invalid token")
 
-        repo = UserRepository(conn)
-        user = repo.get_by_id(int(user_id))
-        if not user or not user.is_active:
-            request.session.clear()
-            if path.startswith("/api"):
-                return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-            return RedirectResponse("/login", status_code=303)
+            jti = payload.get("jti")
+            if not jti:
+                return unauthorized_response(request, detail="Invalid token")
 
-        request.state.user = user
-        return await call_next(request)
+            revoked_repo = RevokedTokenRepository(conn)
+            if revoked_repo.is_revoked(jti, now_ts()):
+                return unauthorized_response(request, detail="Token revoked")
+
+            user_id_raw = payload.get("sub")
+            try:
+                user_id = int(user_id_raw)
+            except (TypeError, ValueError):
+                return unauthorized_response(request, detail="Invalid token")
+
+            user_repo = UserRepository(conn)
+            user = user_repo.get_by_id(user_id)
+            if not user or not user.is_active:
+                return unauthorized_response(request, detail="Unauthorized")
+
+            request.state.user = user
+            request.state.auth_type = "jwt"
+            request.state.token_jti = jti
+        else:
+            session_id = request.cookies.get(SESSION_COOKIE_NAME)
+            if session_id:
+                session_repo = SessionRepository(conn)
+                session = session_repo.get_by_id(session_id)
+                if not session or session.expires_at <= now_ts():
+                    if session:
+                        session_repo.delete(session_id)
+                    clear_cookie = True
+                else:
+                    user_repo = UserRepository(conn)
+                    user = user_repo.get_by_id(int(session.user_id))
+                    if not user or not user.is_active:
+                        session_repo.delete(session_id)
+                        clear_cookie = True
+                    else:
+                        request.state.user = user
+                        request.state.auth_type = "session"
+                        request.state.csrf_token = session.csrf_token
+                        request.state.session_id = session.session_id
+                        session_repo.update_last_seen(session.session_id, now_ts())
+
+        if request.state.user and request.state.auth_type == "session":
+            if requires_csrf(request) and path not in CSRF_EXEMPT_PATHS:
+                if not await validate_csrf(request, request.state.csrf_token):
+                    return forbidden_response(request, detail="Invalid CSRF token")
+
+        if not request.state.user and not is_public:
+            response = unauthorized_response(request)
+            if clear_cookie and hasattr(response, "delete_cookie"):
+                response.delete_cookie(
+                    SESSION_COOKIE_NAME,
+                    path="/",
+                    samesite="lax",
+                    secure=not DEBUG,
+                    httponly=True,
+                )
+            return response
+
+        response = await call_next(request)
+        if clear_cookie and hasattr(response, "delete_cookie"):
+            response.delete_cookie(
+                SESSION_COOKIE_NAME,
+                path="/",
+                samesite="lax",
+                secure=not DEBUG,
+                httponly=True,
+            )
+        return response
     finally:
         if conn:
             conn.close()
-
-
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=SESSION_SECRET,
-    https_only=not DEBUG,
-    same_site="lax",
-)
 
 
 def initialize_app():
@@ -326,7 +556,7 @@ async def app_info():
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Login page."""
-    if request.session.get("user_id"):
+    if getattr(request.state, "user", None):
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse("login.html", template_context(request))
 
@@ -334,38 +564,124 @@ async def login_page(request: Request):
 @app.post("/login")
 async def login(
     request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
-    conn: sqlite3.Connection = Depends(get_db)
+    username: Optional[str] = Form(None),
+    password: Optional[str] = Form(None),
+    conn: sqlite3.Connection = Depends(get_db),
 ):
-    """Authenticate user and create session."""
-    repo = UserRepository(conn)
-    try:
-        validate_password_length(password)
-    except ValueError:
+    """Authenticate user and create session or issue JWT."""
+    is_json = "application/json" in request.headers.get("content-type", "").lower()
+    if is_json:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        username = payload.get("username")
+        password = payload.get("password")
+
+    user = authenticate_credentials(conn, username, password)
+    if not user:
+        if is_api_request(request) or is_json:
+            return JSONResponse(status_code=401, content={"detail": "Invalid username or password"})
         return templates.TemplateResponse(
             "login.html",
             template_context(request, error="Invalid username or password"),
-            status_code=401
-        )
-    user = repo.get_by_username(username.strip())
-    if not user or not user.is_active or not verify_password(password, user.password_hash):
-        return templates.TemplateResponse(
-            "login.html",
-            template_context(request, error="Invalid username or password"),
-            status_code=401
+            status_code=401,
         )
 
-    request.session["user_id"] = user.id
+    repo = UserRepository(conn)
     repo.update_last_login(user.id)
-    return RedirectResponse("/", status_code=303)
+
+    if is_api_request(request) or is_json:
+        token, exp_ts, _jti = create_access_token(
+            user_id=user.id,
+            username=user.username,
+            role=user.role,
+            secret=JWT_SECRET,
+            algorithm=JWT_ALGORITHM,
+            expires_minutes=JWT_EXPIRE_MINUTES,
+        )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "access_token": token,
+                "token_type": "bearer",
+                "expires_in": max(0, exp_ts - now_ts()),
+                "user": {"id": user.id, "username": user.username, "role": user.role},
+            },
+        )
+
+    session_id, _csrf_token, expires_at = create_session(conn, user.id, request)
+    response = RedirectResponse("/", status_code=303)
+    set_session_cookie(response, session_id, expires_at)
+    return response
+
+
+@app.post("/api/login")
+async def api_login(payload: LoginRequest, conn: sqlite3.Connection = Depends(get_db)):
+    """API login: issue JWT token."""
+    user = authenticate_credentials(conn, payload.username, payload.password)
+    if not user:
+        return JSONResponse(status_code=401, content={"detail": "Invalid username or password"})
+
+    repo = UserRepository(conn)
+    repo.update_last_login(user.id)
+
+    token, exp_ts, _jti = create_access_token(
+        user_id=user.id,
+        username=user.username,
+        role=user.role,
+        secret=JWT_SECRET,
+        algorithm=JWT_ALGORITHM,
+        expires_minutes=JWT_EXPIRE_MINUTES,
+    )
+    return JSONResponse(
+        status_code=200,
+        content={
+            "access_token": token,
+            "token_type": "bearer",
+            "expires_in": max(0, exp_ts - now_ts()),
+            "user": {"id": user.id, "username": user.username, "role": user.role},
+        },
+    )
 
 
 @app.get("/logout")
-async def logout(request: Request):
-    """Clear user session."""
-    request.session.clear()
-    return RedirectResponse("/login", status_code=303)
+async def logout(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    """Clear user session (browser)."""
+    if request.state.auth_type == "session" and request.state.session_id:
+        SessionRepository(conn).delete(request.state.session_id)
+    response = RedirectResponse("/login", status_code=303)
+    clear_session_cookie(response)
+    return response
+
+
+@app.post("/api/logout")
+async def api_logout(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    """API logout: revoke JWT or clear session."""
+    if request.state.auth_type == "jwt":
+        token = get_bearer_token(request)
+        if token:
+            try:
+                payload = decode_access_token(
+                    token,
+                    JWT_SECRET,
+                    JWT_ALGORITHM,
+                    verify_exp=False,
+                )
+                jti = payload.get("jti")
+                exp = payload.get("exp")
+                if jti and exp and int(exp) > now_ts():
+                    RevokedTokenRepository(conn).revoke(jti, int(exp))
+            except jwt.PyJWTError:
+                pass
+
+    if request.state.auth_type == "session" and request.state.session_id:
+        SessionRepository(conn).delete(request.state.session_id)
+
+    response = JSONResponse(status_code=200, content={"detail": "Logged out"})
+    if request.state.auth_type == "session":
+        clear_session_cookie(response)
+    return response
 
 
 # ============================================================================
