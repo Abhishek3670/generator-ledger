@@ -427,7 +427,7 @@ class UserRepository:
         cur = self.conn.cursor()
         cur.execute(
             "SELECT id, username, password_hash, role, is_active, created_at, last_login "
-            "FROM users ORDER BY username"
+            "FROM users ORDER BY created_at DESC, id DESC"
         )
         users = []
         for row in cur.fetchall():

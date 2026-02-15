@@ -48,12 +48,25 @@
 
             <main class="space-y-6 [animation:fadeUp_0.6s_ease-out_0.1s_both]">
                 <section data-settings-section="user-management" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Admin</div>
-                    <h1 class="mt-2 text-2xl font-semibold text-slate-900">User Management</h1>
-                    <p class="mt-1 text-sm text-slate-500">Create users and control access roles.</p>
+                    <div class="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Admin</div>
+                            <h1 class="mt-2 text-2xl font-semibold text-slate-900">User Management</h1>
+                            <p class="mt-1 text-sm text-slate-500">Create users and control access roles.</p>
+                        </div>
+                        <button id="openCreateUserModal" type="button" class="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">
+                            Create User
+                        </button>
+                    </div>
 
-                    {% if message %}
+                    {% if message and message != 'User deleted successfully' %}
                     <div class="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                        {{ message }}
+                    </div>
+                    {% endif %}
+
+                    {% if message == 'User deleted successfully' %}
+                    <div class="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                         {{ message }}
                     </div>
                     {% endif %}
@@ -63,33 +76,6 @@
                         {{ error }}
                     </div>
                     {% endif %}
-
-                    <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                        <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Create User</div>
-                        <form method="post" action="/admin/settings/users/create" class="mt-4 grid gap-4 sm:grid-cols-3">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                            <div>
-                                <label class="text-sm font-semibold text-slate-700">Username</label>
-                                <input name="username" required class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
-                            </div>
-                            <div>
-                                <label class="text-sm font-semibold text-slate-700">Password</label>
-                                <input type="password" name="password" required class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
-                            </div>
-                            <div>
-                                <label class="text-sm font-semibold text-slate-700">Role</label>
-                                <select name="role" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
-                                    <option value="operator">Operator</option>
-                                    <option value="admin">Admin</option>
-                                </select>
-                            </div>
-                            <div class="sm:col-span-3">
-                                <button type="submit" class="rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">
-                                    Create User
-                                </button>
-                            </div>
-                        </form>
-                    </section>
 
                     <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                         <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Existing Users</div>
@@ -111,33 +97,27 @@
                                         {% for u in users %}
                                         <tr class="transition hover:bg-slate-50">
                                             <td class="px-4 py-3 font-semibold text-slate-900">{{ u.username }}</td>
-                                            <td class="px-4 py-3">
-                                                <form method="post" action="/admin/settings/users/{{ u.id }}/update" class="flex flex-wrap items-center gap-2">
-                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                                    <select name="role" class="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700">
-                                                        <option value="operator" {% if u.role == 'operator' %}selected{% endif %}>Operator</option>
-                                                        <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>Admin</option>
-                                                    </select>
-                                                    <label class="flex items-center gap-2 text-xs text-slate-600">
-                                                        <input type="checkbox" name="is_active" {% if u.is_active %}checked{% endif %}>
-                                                        Active
-                                                    </label>
-                                                    <button type="submit" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
-                                                        Update
-                                                    </button>
-                                                </form>
+                                            <td class="px-4 py-3 text-sm">
+                                                <span class="text-slate-700">{{ u.role }}</span>
+                                                <span class="text-slate-400">/</span>
+                                                <span class="{{ 'font-semibold text-emerald-700' if u.is_active else 'font-semibold text-rose-700' }}">
+                                                    {{ 'active' if u.is_active else 'inactive' }}
+                                                </span>
                                             </td>
                                             <td class="px-4 py-3 text-xs text-slate-500">{{ u.last_login or '-' }}</td>
                                             <td class="px-4 py-3 text-xs text-slate-500">{{ u.created_at }}</td>
                                             <td class="px-4 py-3">
                                                 <div class="flex flex-wrap items-center gap-2">
-                                                    <form method="post" action="/admin/settings/users/{{ u.id }}/password" class="flex flex-wrap items-center gap-2">
-                                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                                        <input type="password" name="new_password" placeholder="New password" class="w-36 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700">
-                                                        <button type="submit" class="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white transition hover:bg-slate-800">
-                                                            Reset
-                                                        </button>
-                                                    </form>
+                                                    <button
+                                                        type="button"
+                                                        class="js-open-edit-user-modal rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                                                        data-user-id="{{ u.id }}"
+                                                        data-username="{{ u.username }}"
+                                                        data-role="{{ u.role }}"
+                                                        data-user-active="{{ '1' if u.is_active else '0' }}"
+                                                    >
+                                                        Edit
+                                                    </button>
                                                     <form method="post" action="/admin/settings/users/{{ u.id }}/delete" onsubmit="return confirm('Delete user {{ u.username }}? This cannot be undone.');">
                                                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                                         <button type="submit" class="rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50">
@@ -158,6 +138,7 @@
                         </div>
                         {% endif %}
                     </section>
+
                 </section>
 
                 <section data-settings-section="server-health" class="hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -218,6 +199,106 @@
     </div>
 </div>
 
+<div id="createUserModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
+    <div class="w-full max-w-xl rounded-2xl bg-white shadow-xl">
+        <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Admin</div>
+                <div class="mt-1 text-lg font-semibold text-slate-900">Create User</div>
+            </div>
+            <button id="closeCreateUserModal" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                Close
+            </button>
+        </div>
+        <form id="createUserForm" method="post" action="/admin/settings/users/create" class="space-y-4 px-6 py-5">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div>
+                <label class="text-sm font-semibold text-slate-700">Username</label>
+                <input id="createUserUsername" name="username" required class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+            </div>
+            <div>
+                <label class="text-sm font-semibold text-slate-700">Password</label>
+                <input type="password" name="password" required class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+            </div>
+            <div>
+                <label class="text-sm font-semibold text-slate-700">Role</label>
+                <select name="role" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                    <option value="operator">Operator</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
+                <button type="button" id="cancelCreateUserModal" class="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                    Cancel
+                </button>
+                <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">
+                    Create User
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="editUserModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
+    <div class="w-full max-w-xl rounded-2xl bg-white shadow-xl">
+        <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Edit User</div>
+                <div id="editUserModalTitle" class="mt-1 text-lg font-semibold text-slate-900">User</div>
+                <div id="editUserModalMeta" class="mt-1 text-xs text-slate-500"></div>
+            </div>
+            <button id="closeEditUserModal" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                Close
+            </button>
+        </div>
+
+        <div class="space-y-6 px-6 py-5">
+            <form id="editUserUpdateForm" method="post" action="/admin/settings/users/0/update" class="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Update Access</div>
+                <div>
+                    <label class="text-sm font-semibold text-slate-700">Role</label>
+                    <select id="editUserRole" name="role" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                        <option value="operator">Operator</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                <label class="flex items-center gap-2 text-sm text-slate-700">
+                    <input id="editUserActive" type="checkbox" name="is_active">
+                    Active
+                </label>
+                <div class="flex justify-end">
+                    <button type="submit" class="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900">
+                        Save Access
+                    </button>
+                </div>
+            </form>
+
+            <form id="editUserPasswordForm" method="post" action="/admin/settings/users/0/password" class="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Reset Password</div>
+                <div>
+                    <label class="text-sm font-semibold text-slate-700">New Password</label>
+                    <input id="editUserNewPassword" type="password" name="new_password" required class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                </div>
+                <div>
+                    <label class="text-sm font-semibold text-slate-700">Confirm Password</label>
+                    <input id="editUserConfirmPassword" type="password" name="confirm_new_password" required class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                    <p id="editUserPasswordMismatchError" class="mt-2 hidden text-xs text-rose-600">Passwords do not match.</p>
+                </div>
+                <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
+                    <button type="button" id="cancelEditUserModal" class="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                        Cancel
+                    </button>
+                    <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">
+                        Reset Password
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script>
     (function () {
         const navItems = Array.from(document.querySelectorAll('.settings-nav-item'));
@@ -233,6 +314,25 @@
         const healthTitle = document.getElementById('healthTitle');
         const healthVersion = document.getElementById('healthVersion');
         const healthDatabase = document.getElementById('healthDatabase');
+        const openCreateUserModalButton = document.getElementById('openCreateUserModal');
+        const createUserModal = document.getElementById('createUserModal');
+        const closeCreateUserModalButton = document.getElementById('closeCreateUserModal');
+        const cancelCreateUserModalButton = document.getElementById('cancelCreateUserModal');
+        const createUserForm = document.getElementById('createUserForm');
+        const createUserUsernameInput = document.getElementById('createUserUsername');
+        const editUserModal = document.getElementById('editUserModal');
+        const closeEditUserModalButton = document.getElementById('closeEditUserModal');
+        const cancelEditUserModalButton = document.getElementById('cancelEditUserModal');
+        const editUserModalTitle = document.getElementById('editUserModalTitle');
+        const editUserModalMeta = document.getElementById('editUserModalMeta');
+        const editUserUpdateForm = document.getElementById('editUserUpdateForm');
+        const editUserPasswordForm = document.getElementById('editUserPasswordForm');
+        const editUserRole = document.getElementById('editUserRole');
+        const editUserActive = document.getElementById('editUserActive');
+        const editUserNewPassword = document.getElementById('editUserNewPassword');
+        const editUserConfirmPassword = document.getElementById('editUserConfirmPassword');
+        const editUserPasswordMismatchError = document.getElementById('editUserPasswordMismatchError');
+        const editUserButtons = Array.from(document.querySelectorAll('.js-open-edit-user-modal'));
 
         const activeClasses = ['border-slate-300', 'bg-slate-900', 'text-white'];
         const inactiveClasses = ['border-slate-200', 'bg-white', 'text-slate-900', 'hover:border-slate-300', 'hover:bg-slate-50'];
@@ -245,6 +345,105 @@
         const badgeUnknownClasses = ['bg-slate-200', 'text-slate-700'];
         let hasLoadedHealth = false;
         let isLoadingHealth = false;
+
+        function clearPasswordMatchError() {
+            if (editUserConfirmPassword) {
+                editUserConfirmPassword.setCustomValidity('');
+            }
+            if (editUserPasswordMismatchError) {
+                editUserPasswordMismatchError.classList.add('hidden');
+            }
+        }
+
+        function validatePasswordMatch(showInlineError) {
+            if (!editUserNewPassword || !editUserConfirmPassword) return true;
+            const matches = editUserNewPassword.value === editUserConfirmPassword.value;
+            if (matches || editUserConfirmPassword.value.length === 0) {
+                clearPasswordMatchError();
+                return true;
+            }
+            editUserConfirmPassword.setCustomValidity('Passwords do not match');
+            if (showInlineError && editUserPasswordMismatchError) {
+                editUserPasswordMismatchError.classList.remove('hidden');
+            }
+            return false;
+        }
+
+        function syncBodyScrollLock() {
+            const hasOpenModal = (
+                (createUserModal && !createUserModal.classList.contains('hidden'))
+                || (editUserModal && !editUserModal.classList.contains('hidden'))
+            );
+            document.body.classList.toggle('overflow-hidden', hasOpenModal);
+        }
+
+        function openModal(modal) {
+            if (!modal) return;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            syncBodyScrollLock();
+        }
+
+        function closeModal(modal) {
+            if (!modal) return;
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            syncBodyScrollLock();
+        }
+
+        function closeCreateModal() {
+            closeModal(createUserModal);
+            if (createUserForm) {
+                createUserForm.reset();
+            }
+        }
+
+        function closeEditModal() {
+            closeModal(editUserModal);
+            if (editUserPasswordForm) {
+                editUserPasswordForm.reset();
+            }
+            clearPasswordMatchError();
+        }
+
+        function openCreateModal() {
+            closeEditModal();
+            openModal(createUserModal);
+            if (createUserUsernameInput) {
+                createUserUsernameInput.focus();
+            }
+        }
+
+        function openEditModal(userData) {
+            if (!editUserUpdateForm || !editUserPasswordForm || !editUserRole || !editUserActive) return;
+
+            const userId = userData.userId || '';
+            const username = userData.username || 'User';
+            const role = userData.role === 'admin' ? 'admin' : 'operator';
+            const isActive = String(userData.userActive || '') === '1';
+
+            editUserUpdateForm.action = `/admin/settings/users/${encodeURIComponent(userId)}/update`;
+            editUserPasswordForm.action = `/admin/settings/users/${encodeURIComponent(userId)}/password`;
+            editUserRole.value = role;
+            editUserActive.checked = isActive;
+            if (editUserNewPassword) {
+                editUserNewPassword.value = '';
+            }
+            if (editUserConfirmPassword) {
+                editUserConfirmPassword.value = '';
+            }
+            clearPasswordMatchError();
+            if (editUserModalTitle) {
+                editUserModalTitle.textContent = username;
+            }
+            if (editUserModalMeta) {
+                editUserModalMeta.textContent = `User ID: ${userId}`;
+            }
+
+            closeCreateModal();
+            openModal(editUserModal);
+            editUserRole.focus();
+        }
 
         function activateSection(target) {
             navItems.forEach((item) => {
@@ -400,6 +599,66 @@
                 if (!sectionName || !sectionMap.has(sectionName)) return;
                 activateSection(sectionName);
             });
+        });
+
+        if (openCreateUserModalButton) {
+            openCreateUserModalButton.addEventListener('click', openCreateModal);
+        }
+        if (closeCreateUserModalButton) {
+            closeCreateUserModalButton.addEventListener('click', closeCreateModal);
+        }
+        if (cancelCreateUserModalButton) {
+            cancelCreateUserModalButton.addEventListener('click', closeCreateModal);
+        }
+
+        editUserButtons.forEach((button) => {
+            button.addEventListener('click', () => {
+                openEditModal(button.dataset);
+            });
+        });
+        if (closeEditUserModalButton) {
+            closeEditUserModalButton.addEventListener('click', closeEditModal);
+        }
+        if (cancelEditUserModalButton) {
+            cancelEditUserModalButton.addEventListener('click', closeEditModal);
+        }
+
+        if (editUserPasswordForm) {
+            editUserPasswordForm.addEventListener('submit', (event) => {
+                if (!validatePasswordMatch(true)) {
+                    event.preventDefault();
+                    if (editUserConfirmPassword) {
+                        editUserConfirmPassword.reportValidity();
+                    }
+                }
+            });
+        }
+
+        if (editUserNewPassword) {
+            editUserNewPassword.addEventListener('input', () => {
+                validatePasswordMatch(true);
+            });
+        }
+
+        if (editUserConfirmPassword) {
+            editUserConfirmPassword.addEventListener('input', () => {
+                validatePasswordMatch(true);
+            });
+        }
+
+        window.addEventListener('click', (event) => {
+            if (event.target === createUserModal) {
+                closeCreateModal();
+            }
+            if (event.target === editUserModal) {
+                closeEditModal();
+            }
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key !== 'Escape') return;
+            closeCreateModal();
+            closeEditModal();
         });
 
         if (refreshButton) {

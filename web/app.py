@@ -1233,6 +1233,7 @@ async def admin_reset_password(
     request: Request,
     user_id: int,
     new_password: str = Form(...),
+    confirm_new_password: Optional[str] = Form(default=None),
     conn: sqlite3.Connection = Depends(get_db),
     _: Any = Depends(require_role(ROLE_ADMIN))
 ):
@@ -1242,6 +1243,11 @@ async def admin_reset_password(
     if not new_password:
         return RedirectResponse(
             f"/admin/settings?error={quote('Password cannot be empty')}",
+            status_code=303
+        )
+    if confirm_new_password is not None and confirm_new_password != new_password:
+        return RedirectResponse(
+            f"/admin/settings?error={quote('Passwords do not match')}",
             status_code=303
         )
     try:
@@ -1305,7 +1311,7 @@ async def admin_delete_user(
     SessionRepository(conn).delete_by_user_id(user_id)
     repo.delete_user(user_id)
     return RedirectResponse(
-        f"/admin/settings?message={quote('User deleted successfully')}",
+        f"/admin/settings?error={quote('User deleted successfully')}",
         status_code=303
     )
 
