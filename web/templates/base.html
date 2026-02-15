@@ -36,7 +36,7 @@
                         <div id="userMenu" class="absolute right-0 mt-2 w-48 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 shadow-lg overflow-hidden hidden">
                             <a href="/history" class="block px-4 py-2 hover:bg-slate-100 {{ 'text-slate-900 font-semibold' if current_path.startswith('/history') else 'text-slate-700' }}">History</a>
                             {% if user.role == 'admin' %}
-                            <a href="/admin/users" class="block px-4 py-2 hover:bg-slate-100 {{ 'text-slate-900 font-semibold' if current_path.startswith('/admin/users') else 'text-slate-700' }}">Users</a>
+                            <a href="/admin/settings" class="block px-4 py-2 hover:bg-slate-100 {{ 'text-slate-900 font-semibold' if current_path.startswith('/admin/settings') else 'text-slate-700' }}">Settings</a>
                             {% endif %}
                             <a href="/logout?csrf_token={{ csrf_token }}" class="block px-4 py-2 hover:bg-slate-100 text-slate-700">Logout</a>
                         </div>

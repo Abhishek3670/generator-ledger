@@ -237,8 +237,34 @@ async def validate_csrf(request: Request, expected_token: str) -> bool:
 
     content_type = request.headers.get("content-type", "").lower()
     if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
-        form = await request.form()
-        form_token = form.get("csrf_token")
+        # Read once, then restore the body stream so downstream Form(...) parsing still works.
+        raw_body = await request.body()
+
+        body_sent = False
+
+        async def receive() -> Dict[str, Any]:
+            nonlocal body_sent
+            if body_sent:
+                return {"type": "http.request", "body": b"", "more_body": False}
+            body_sent = True
+            return {"type": "http.request", "body": raw_body, "more_body": False}
+
+        request._receive = receive
+
+        form_token: Optional[str] = None
+        if "application/x-www-form-urlencoded" in content_type:
+            from urllib.parse import parse_qs
+
+            decoded = raw_body.decode("utf-8", errors="ignore")
+            values = parse_qs(decoded, keep_blank_values=True)
+            form_token = values.get("csrf_token", [None])[0]
+        else:
+            # Minimal multipart token extraction for hidden csrf_token form field.
+            text = raw_body.decode("utf-8", errors="ignore")
+            match = re.search(r'name="csrf_token"\r\n\r\n([^\r\n]+)', text)
+            if match:
+                form_token = match.group(1)
+
         return bool(form_token and form_token == expected_token)
     return False
 
@@ -1078,26 +1104,27 @@ async def edit_booking_page(request: Request, booking_id: str, conn: sqlite3.Con
 
 
 # ============================================================================
-# ADMIN - USER MANAGEMENT
+# ADMIN - SETTINGS
 # ============================================================================
 
-@app.get("/admin/users", response_class=HTMLResponse)
-async def admin_users_page(
+@app.get("/admin/settings", response_class=HTMLResponse)
+async def admin_settings_page(
     request: Request,
     conn: sqlite3.Connection = Depends(get_db),
     _: Any = Depends(require_role(ROLE_ADMIN))
 ):
-    """Admin user management page."""
+    """Admin settings page."""
     repo = UserRepository(conn)
     users = repo.list_all()
     message = request.query_params.get("message")
     error = request.query_params.get("error")
     return templates.TemplateResponse(
-        "users.html",
+        "settings.html",
         template_context(request, users=users, message=message, error=error)
     )
 
 
+@app.post("/admin/settings/users/create")
 @app.post("/admin/users/create")
 async def admin_create_user(
     request: Request,
@@ -1114,37 +1141,38 @@ async def admin_create_user(
     role = role.strip().lower()
     if not username or not password:
         return RedirectResponse(
-            f"/admin/users?error={quote('Username and password are required')}",
+            f"/admin/settings?error={quote('Username and password are required')}",
             status_code=303
         )
     try:
         validate_password_length(password)
     except ValueError as e:
         return RedirectResponse(
-            f"/admin/users?error={quote(str(e))}",
+            f"/admin/settings?error={quote(str(e))}",
             status_code=303
         )
     if role not in ALLOWED_ROLES:
         return RedirectResponse(
-            f"/admin/users?error={quote('Invalid role')}",
+            f"/admin/settings?error={quote('Invalid role')}",
             status_code=303
         )
 
     repo = UserRepository(conn)
     if repo.get_by_username(username):
         return RedirectResponse(
-            f"/admin/users?error={quote('Username already exists')}",
+            f"/admin/settings?error={quote('Username already exists')}",
             status_code=303
         )
 
     password_hash = hash_password(password)
     repo.create_user(username, password_hash, role=role, is_active=True)
     return RedirectResponse(
-        f"/admin/users?message={quote('User created successfully')}",
+        f"/admin/settings?message={quote('User created successfully')}",
         status_code=303
     )
 
 
+@app.post("/admin/settings/users/{user_id}/update")
 @app.post("/admin/users/{user_id}/update")
 async def admin_update_user(
     request: Request,
@@ -1160,7 +1188,7 @@ async def admin_update_user(
     role = role.strip().lower()
     if role not in ALLOWED_ROLES:
         return RedirectResponse(
-            f"/admin/users?error={quote('Invalid role')}",
+            f"/admin/settings?error={quote('Invalid role')}",
             status_code=303
         )
 
@@ -1168,7 +1196,7 @@ async def admin_update_user(
     user = repo.get_by_id(user_id)
     if not user:
         return RedirectResponse(
-            f"/admin/users?error={quote('User not found')}",
+            f"/admin/settings?error={quote('User not found')}",
             status_code=303
         )
 
@@ -1179,14 +1207,14 @@ async def admin_update_user(
         active_admins = repo.count_active_admins(ROLE_ADMIN)
         if active_admins <= 1:
             return RedirectResponse(
-                f"/admin/users?error={quote('Cannot remove or deactivate the last admin')}",
+                f"/admin/settings?error={quote('Cannot remove or deactivate the last admin')}",
                 status_code=303
             )
 
     # Prevent self-demotion or deactivation
     if user.id == current_user.id and (role != ROLE_ADMIN or not active_flag):
         return RedirectResponse(
-            f"/admin/users?error={quote('You cannot remove or deactivate your own admin access')}",
+            f"/admin/settings?error={quote('You cannot remove or deactivate your own admin access')}",
             status_code=303
         )
 
@@ -1194,11 +1222,12 @@ async def admin_update_user(
     repo.update_active(user_id, active_flag)
 
     return RedirectResponse(
-        f"/admin/users?message={quote('User updated successfully')}",
+        f"/admin/settings?message={quote('User updated successfully')}",
         status_code=303
     )
 
 
+@app.post("/admin/settings/users/{user_id}/password")
 @app.post("/admin/users/{user_id}/password")
 async def admin_reset_password(
     request: Request,
@@ -1212,14 +1241,14 @@ async def admin_reset_password(
 
     if not new_password:
         return RedirectResponse(
-            f"/admin/users?error={quote('Password cannot be empty')}",
+            f"/admin/settings?error={quote('Password cannot be empty')}",
             status_code=303
         )
     try:
         validate_password_length(new_password)
     except ValueError as e:
         return RedirectResponse(
-            f"/admin/users?error={quote(str(e))}",
+            f"/admin/settings?error={quote(str(e))}",
             status_code=303
         )
 
@@ -1227,13 +1256,56 @@ async def admin_reset_password(
     user = repo.get_by_id(user_id)
     if not user:
         return RedirectResponse(
-            f"/admin/users?error={quote('User not found')}",
+            f"/admin/settings?error={quote('User not found')}",
             status_code=303
         )
 
     repo.update_password(user_id, hash_password(new_password))
     return RedirectResponse(
-        f"/admin/users?message={quote('Password updated successfully')}",
+        f"/admin/settings?message={quote('Password updated successfully')}",
+        status_code=303
+    )
+
+
+@app.post("/admin/settings/users/{user_id}/delete")
+@app.post("/admin/users/{user_id}/delete")
+async def admin_delete_user(
+    request: Request,
+    user_id: int,
+    conn: sqlite3.Connection = Depends(get_db),
+    current_user: Any = Depends(require_role(ROLE_ADMIN))
+):
+    """Delete a user account."""
+    from urllib.parse import quote
+
+    repo = UserRepository(conn)
+    user = repo.get_by_id(user_id)
+    if not user:
+        return RedirectResponse(
+            f"/admin/settings?error={quote('User not found')}",
+            status_code=303
+        )
+
+    # Prevent removing the last active admin account
+    if user.role == ROLE_ADMIN and user.is_active:
+        active_admins = repo.count_active_admins(ROLE_ADMIN)
+        if active_admins <= 1:
+            return RedirectResponse(
+                f"/admin/settings?error={quote('Cannot delete the last admin')}",
+                status_code=303
+            )
+
+    # Prevent self-deletion from the admin panel
+    if user.id == current_user.id:
+        return RedirectResponse(
+            f"/admin/settings?error={quote('You cannot delete your own account')}",
+            status_code=303
+        )
+
+    SessionRepository(conn).delete_by_user_id(user_id)
+    repo.delete_user(user_id)
+    return RedirectResponse(
+        f"/admin/settings?message={quote('User deleted successfully')}",
         status_code=303
     )
 

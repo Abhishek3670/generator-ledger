@@ -1,0 +1,413 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+    @keyframes fadeUp {
+        0% {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+        100% {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100">
+    <div class="mx-auto max-w-6xl px-4 py-10 lg:py-12 [animation:fadeUp_0.6s_ease-out]" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
+        <div class="grid gap-6 lg:grid-cols-[260px_1fr]">
+            <aside class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm [animation:fadeUp_0.6s_ease-out_0.05s_both] lg:sticky lg:top-24">
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Admin Settings</div>
+                <div class="mt-4 space-y-3">
+                    <button type="button" data-settings-target="user-management" class="settings-nav-item group flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 text-left text-slate-900 transition">
+                        <span data-settings-icon class="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-sm font-semibold text-slate-700 transition group-hover:bg-slate-200">U</span>
+                        <div>
+                            <div class="text-sm font-semibold">User Management</div>
+                            <div data-settings-subtitle class="mt-1 text-xs text-slate-500">Manage access and roles</div>
+                        </div>
+                    </button>
+                    <button type="button" data-settings-target="server-health" class="settings-nav-item group flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 text-left text-slate-900 transition">
+                        <span data-settings-icon class="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-sm font-semibold text-slate-700 transition group-hover:bg-slate-200">S</span>
+                        <div>
+                            <div class="text-sm font-semibold">Server Health</div>
+                            <div data-settings-subtitle class="mt-1 text-xs text-slate-500">Live endpoint status</div>
+                        </div>
+                    </button>
+                    <button type="button" data-settings-target="integration" class="settings-nav-item group flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 text-left text-slate-900 transition">
+                        <span data-settings-icon class="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-sm font-semibold text-slate-700 transition group-hover:bg-slate-200">I</span>
+                        <div>
+                            <div class="text-sm font-semibold">Integration</div>
+                            <div data-settings-subtitle class="mt-1 text-xs text-slate-500">Upcoming connectors</div>
+                        </div>
+                    </button>
+                </div>
+            </aside>
+
+            <main class="space-y-6 [animation:fadeUp_0.6s_ease-out_0.1s_both]">
+                <section data-settings-section="user-management" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Admin</div>
+                    <h1 class="mt-2 text-2xl font-semibold text-slate-900">User Management</h1>
+                    <p class="mt-1 text-sm text-slate-500">Create users and control access roles.</p>
+
+                    {% if message %}
+                    <div class="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                        {{ message }}
+                    </div>
+                    {% endif %}
+
+                    {% if error %}
+                    <div class="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                        {{ error }}
+                    </div>
+                    {% endif %}
+
+                    <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                        <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Create User</div>
+                        <form method="post" action="/admin/settings/users/create" class="mt-4 grid gap-4 sm:grid-cols-3">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <div>
+                                <label class="text-sm font-semibold text-slate-700">Username</label>
+                                <input name="username" required class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                            </div>
+                            <div>
+                                <label class="text-sm font-semibold text-slate-700">Password</label>
+                                <input type="password" name="password" required class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                            </div>
+                            <div>
+                                <label class="text-sm font-semibold text-slate-700">Role</label>
+                                <select name="role" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                                    <option value="operator">Operator</option>
+                                    <option value="admin">Admin</option>
+                                </select>
+                            </div>
+                            <div class="sm:col-span-3">
+                                <button type="submit" class="rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">
+                                    Create User
+                                </button>
+                            </div>
+                        </form>
+                    </section>
+
+                    <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                        <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Existing Users</div>
+
+                        {% if users %}
+                        <div class="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full text-sm">
+                                    <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                                        <tr>
+                                            <th class="px-4 py-3 text-left font-semibold">User</th>
+                                            <th class="px-4 py-3 text-left font-semibold">Role / Status</th>
+                                            <th class="px-4 py-3 text-left font-semibold">Last Login</th>
+                                            <th class="px-4 py-3 text-left font-semibold">Created</th>
+                                            <th class="px-4 py-3 text-left font-semibold">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100 text-slate-700">
+                                        {% for u in users %}
+                                        <tr class="transition hover:bg-slate-50">
+                                            <td class="px-4 py-3 font-semibold text-slate-900">{{ u.username }}</td>
+                                            <td class="px-4 py-3">
+                                                <form method="post" action="/admin/settings/users/{{ u.id }}/update" class="flex flex-wrap items-center gap-2">
+                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                    <select name="role" class="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700">
+                                                        <option value="operator" {% if u.role == 'operator' %}selected{% endif %}>Operator</option>
+                                                        <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>Admin</option>
+                                                    </select>
+                                                    <label class="flex items-center gap-2 text-xs text-slate-600">
+                                                        <input type="checkbox" name="is_active" {% if u.is_active %}checked{% endif %}>
+                                                        Active
+                                                    </label>
+                                                    <button type="submit" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                                                        Update
+                                                    </button>
+                                                </form>
+                                            </td>
+                                            <td class="px-4 py-3 text-xs text-slate-500">{{ u.last_login or '-' }}</td>
+                                            <td class="px-4 py-3 text-xs text-slate-500">{{ u.created_at }}</td>
+                                            <td class="px-4 py-3">
+                                                <div class="flex flex-wrap items-center gap-2">
+                                                    <form method="post" action="/admin/settings/users/{{ u.id }}/password" class="flex flex-wrap items-center gap-2">
+                                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                        <input type="password" name="new_password" placeholder="New password" class="w-36 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700">
+                                                        <button type="submit" class="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white transition hover:bg-slate-800">
+                                                            Reset
+                                                        </button>
+                                                    </form>
+                                                    <form method="post" action="/admin/settings/users/{{ u.id }}/delete" onsubmit="return confirm('Delete user {{ u.username }}? This cannot be undone.');">
+                                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                        <button type="submit" class="rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50">
+                                                            Delete
+                                                        </button>
+                                                    </form>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% else %}
+                        <div class="mt-4 rounded-xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
+                            No users found.
+                        </div>
+                        {% endif %}
+                    </section>
+                </section>
+
+                <section data-settings-section="server-health" class="hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Server Health</div>
+                            <h2 class="mt-2 text-2xl font-semibold text-slate-900">Live System Status</h2>
+                            <p class="mt-1 text-sm text-slate-500">Real-time health from `/health` and `/api/info`.</p>
+                        </div>
+                        <button id="refreshServerHealth" type="button" class="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900">
+                            Refresh
+                        </button>
+                    </div>
+
+                    <div id="serverHealthLoading" class="mt-4 hidden rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                        Loading server health...
+                    </div>
+
+                    <div id="serverHealthError" class="mt-4 hidden rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"></div>
+
+                    <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        <article class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Application</div>
+                            <div class="mt-3 flex items-center gap-2">
+                                <span id="healthStatusBadge" class="inline-flex rounded-full bg-slate-200 px-2 py-1 text-xs font-semibold text-slate-700">Unknown</span>
+                                <span id="healthStatusValue" class="text-sm font-semibold text-slate-900">Waiting for data</span>
+                            </div>
+                            <div class="mt-3 text-xs text-slate-500">Last checked: <span id="healthCheckedAt">-</span></div>
+                        </article>
+
+                        <article class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Build Info</div>
+                            <div class="mt-3 text-sm text-slate-700">
+                                <div><span class="font-semibold text-slate-900">Title:</span> <span id="healthTitle">-</span></div>
+                                <div class="mt-2"><span class="font-semibold text-slate-900">Version:</span> <span id="healthVersion">-</span></div>
+                            </div>
+                        </article>
+
+                        <article class="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2 lg:col-span-1">
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Database Path</div>
+                            <div id="healthDatabase" class="mt-3 break-all text-sm text-slate-700">-</div>
+                        </article>
+                    </div>
+                </section>
+
+                <section data-settings-section="integration" class="hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Integration</div>
+                    <h2 class="mt-2 text-2xl font-semibold text-slate-900">Coming Soon</h2>
+                    <p class="mt-2 text-sm text-slate-600">
+                        This section is reserved for future integration settings.
+                    </p>
+                    <div class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-sm text-slate-500">
+                        Integration configuration will be available in a future release.
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const navItems = Array.from(document.querySelectorAll('.settings-nav-item'));
+        const sectionNodes = Array.from(document.querySelectorAll('[data-settings-section]'));
+        const sectionMap = new Map(sectionNodes.map((node) => [node.getAttribute('data-settings-section'), node]));
+
+        const refreshButton = document.getElementById('refreshServerHealth');
+        const healthLoading = document.getElementById('serverHealthLoading');
+        const healthError = document.getElementById('serverHealthError');
+        const healthStatusBadge = document.getElementById('healthStatusBadge');
+        const healthStatusValue = document.getElementById('healthStatusValue');
+        const healthCheckedAt = document.getElementById('healthCheckedAt');
+        const healthTitle = document.getElementById('healthTitle');
+        const healthVersion = document.getElementById('healthVersion');
+        const healthDatabase = document.getElementById('healthDatabase');
+
+        const activeClasses = ['border-slate-300', 'bg-slate-900', 'text-white'];
+        const inactiveClasses = ['border-slate-200', 'bg-white', 'text-slate-900', 'hover:border-slate-300', 'hover:bg-slate-50'];
+        const activeIconClasses = ['bg-white/20', 'text-white'];
+        const inactiveIconClasses = ['bg-slate-100', 'text-slate-700', 'group-hover:bg-slate-200'];
+        const activeSubtitleClasses = ['text-white/70'];
+        const inactiveSubtitleClasses = ['text-slate-500'];
+        const badgeHealthyClasses = ['bg-emerald-100', 'text-emerald-700'];
+        const badgeUnhealthyClasses = ['bg-rose-100', 'text-rose-700'];
+        const badgeUnknownClasses = ['bg-slate-200', 'text-slate-700'];
+        let hasLoadedHealth = false;
+        let isLoadingHealth = false;
+
+        function activateSection(target) {
+            navItems.forEach((item) => {
+                const isActive = item.getAttribute('data-settings-target') === target;
+                item.classList.remove(...activeClasses, ...inactiveClasses);
+                if (isActive) {
+                    item.classList.add(...activeClasses);
+                } else {
+                    item.classList.add(...inactiveClasses);
+                }
+
+                const icon = item.querySelector('[data-settings-icon]');
+                if (icon) {
+                    icon.classList.remove(...activeIconClasses, ...inactiveIconClasses);
+                    if (isActive) {
+                        icon.classList.add(...activeIconClasses);
+                    } else {
+                        icon.classList.add(...inactiveIconClasses);
+                    }
+                }
+
+                const subtitle = item.querySelector('[data-settings-subtitle]');
+                if (subtitle) {
+                    subtitle.classList.remove(...activeSubtitleClasses, ...inactiveSubtitleClasses);
+                    if (isActive) {
+                        subtitle.classList.add(...activeSubtitleClasses);
+                    } else {
+                        subtitle.classList.add(...inactiveSubtitleClasses);
+                    }
+                }
+            });
+
+            sectionNodes.forEach((node) => {
+                const sectionName = node.getAttribute('data-settings-section');
+                node.classList.toggle('hidden', sectionName !== target);
+            });
+
+            if (target === 'server-health' && !hasLoadedHealth) {
+                loadServerHealth();
+            }
+        }
+
+        function setHealthLoadingState(isLoading) {
+            if (!healthLoading || !refreshButton) return;
+            healthLoading.classList.toggle('hidden', !isLoading);
+            refreshButton.disabled = isLoading;
+            refreshButton.classList.toggle('opacity-60', isLoading);
+            refreshButton.classList.toggle('cursor-not-allowed', isLoading);
+        }
+
+        function resetHealthBadge() {
+            if (!healthStatusBadge) return;
+            healthStatusBadge.classList.remove(...badgeHealthyClasses, ...badgeUnhealthyClasses, ...badgeUnknownClasses);
+        }
+
+        function renderHealthError(message) {
+            if (!healthError) return;
+            healthError.textContent = message;
+            healthError.classList.remove('hidden');
+        }
+
+        function clearHealthError() {
+            if (!healthError) return;
+            healthError.textContent = '';
+            healthError.classList.add('hidden');
+        }
+
+        function updateCheckedAt() {
+            if (!healthCheckedAt) return;
+            healthCheckedAt.textContent = new Date().toLocaleString();
+        }
+
+        async function loadServerHealth() {
+            if (isLoadingHealth) return;
+            isLoadingHealth = true;
+            setHealthLoadingState(true);
+            clearHealthError();
+
+            try {
+                const [healthResponse, infoResponse] = await Promise.all([
+                    fetch('/health'),
+                    fetch('/api/info')
+                ]);
+
+                if (healthResponse.status === 401 || infoResponse.status === 401) {
+                    window.location.href = '/login';
+                    return;
+                }
+                if (!healthResponse.ok || !infoResponse.ok) {
+                    throw new Error('Unable to fetch server health data.');
+                }
+
+                const [healthData, infoData] = await Promise.all([
+                    healthResponse.json(),
+                    infoResponse.json()
+                ]);
+
+                const healthStatus = String(healthData.status || 'unknown');
+                const isHealthy = healthStatus.toLowerCase() === 'healthy';
+                resetHealthBadge();
+                if (healthStatusBadge) {
+                    if (isHealthy) {
+                        healthStatusBadge.classList.add(...badgeHealthyClasses);
+                        healthStatusBadge.textContent = 'Healthy';
+                    } else {
+                        healthStatusBadge.classList.add(...badgeUnhealthyClasses);
+                        healthStatusBadge.textContent = 'Error';
+                    }
+                }
+                if (healthStatusValue) {
+                    healthStatusValue.textContent = healthStatus;
+                }
+                if (healthTitle) {
+                    healthTitle.textContent = infoData.title || healthData.app || '-';
+                }
+                if (healthVersion) {
+                    healthVersion.textContent = infoData.version || healthData.version || '-';
+                }
+                if (healthDatabase) {
+                    healthDatabase.textContent = infoData.database || '-';
+                }
+                updateCheckedAt();
+                hasLoadedHealth = true;
+            } catch (error) {
+                resetHealthBadge();
+                if (healthStatusBadge) {
+                    healthStatusBadge.classList.add(...badgeUnknownClasses);
+                    healthStatusBadge.textContent = 'Unknown';
+                }
+                if (healthStatusValue) {
+                    healthStatusValue.textContent = 'Unavailable';
+                }
+                if (healthTitle) {
+                    healthTitle.textContent = '-';
+                }
+                if (healthVersion) {
+                    healthVersion.textContent = '-';
+                }
+                if (healthDatabase) {
+                    healthDatabase.textContent = '-';
+                }
+                updateCheckedAt();
+                renderHealthError('Unable to load server health right now. Please try again.');
+            } finally {
+                isLoadingHealth = false;
+                setHealthLoadingState(false);
+            }
+        }
+
+        navItems.forEach((item) => {
+            item.addEventListener('click', () => {
+                const sectionName = item.getAttribute('data-settings-target');
+                if (!sectionName || !sectionMap.has(sectionName)) return;
+                activateSection(sectionName);
+            });
+        });
+
+        if (refreshButton) {
+            refreshButton.addEventListener('click', loadServerHealth);
+        }
+
+        activateSection('user-management');
+        loadServerHealth();
+    })();
+</script>
+{% endblock %}

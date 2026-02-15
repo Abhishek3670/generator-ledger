@@ -485,6 +485,11 @@ class UserRepository:
         cur.execute("UPDATE users SET last_login = datetime('now') WHERE id = ?", (user_id,))
         self.conn.commit()
 
+    def delete_user(self, user_id: int) -> None:
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        self.conn.commit()
+
 
 class SessionRepository:
     """Repository for server-side session storage."""
@@ -544,6 +549,11 @@ class SessionRepository:
     def delete(self, session_id: str) -> None:
         cur = self.conn.cursor()
         cur.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        self.conn.commit()
+
+    def delete_by_user_id(self, user_id: int) -> None:
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
         self.conn.commit()
 
     def delete_expired(self, now_ts: int) -> None:
