@@ -16,7 +16,7 @@
             <input
                 type="text"
                 id="bookingFilter"
-                placeholder="Search by Vendor, Status, or Date"
+                placeholder="Search by Vendor name or ID"
                 class="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
             >
         </div>
@@ -35,43 +35,63 @@
                         <table class="min-w-full text-sm">
                             <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                                 <tr>
-                                    <th class="px-4 py-3 text-left font-semibold">Booked Dates</th>
-                                    <th class="px-4 py-3 text-left font-semibold">Generators</th>
-                                    <th class="px-4 py-3 text-left font-semibold">Status</th>
-                                    <th class="px-4 py-3 text-left font-semibold">Created</th>
-                                    <th class="px-4 py-3 text-left font-semibold">Action</th>
+                                    <th class="px-4 py-3 text-left font-semibold">Booked Date</th>
+                                    <th class="px-4 py-3 text-left font-semibold">Gensets (kVA)</th>
+                                    <th class="px-4 py-3 text-center font-semibold">Status</th>
+                                    <th class="px-4 py-3 text-center font-semibold">Created</th>
+                                    <th class="px-4 py-3 text-center font-semibold">Action</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-slate-100 text-slate-700">
-                                {% for booking_info in vendor_data.bookings %}
-                                <tr class="transition hover:bg-slate-50">
-                                    <td class="px-4 py-3 font-semibold text-slate-900">
-                                        <div class="flex flex-col gap-1 text-sm font-semibold text-slate-900">
-                                            {% for date in booking_info.booked_dates.split(', ') %}
-                                            <span>{{ date }}</span>
-                                            {% endfor %}
-                                        </div>
-                                    </td>
-                                    <td class="px-4 py-3">{{ booking_info.item_count }}</td>
-                                    <td class="px-4 py-3">
-                                        <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold
-                                            {% if booking_info.booking.status == 'Confirmed' %}bg-emerald-100 text-emerald-700
-                                            {% elif booking_info.booking.status == 'Pending' %}bg-amber-100 text-amber-700
-                                            {% else %}bg-rose-100 text-rose-700{% endif %}">
-                                            {{ booking_info.booking.status }}
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3">{{ booking_info.booking.created_at }}</td>
-                                    <td class="px-4 py-3">
-                                        <div class="flex flex-wrap gap-2">
-                                            <a href="/booking/{{ booking_info.booking.booking_id }}" class="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white transition hover:bg-slate-800">View</a>
-                                            <a href="/booking/{{ booking_info.booking.booking_id }}/edit" class="rounded-full bg-amber-400 px-3 py-1 text-xs font-semibold text-amber-950 transition hover:bg-amber-300">Modify</a>
-                                            {% if user and user.role == 'admin' %}
-                                            <button class="rounded-full bg-rose-500 px-3 py-1 text-xs font-semibold text-white transition hover:bg-rose-400" onclick="deleteBooking('{{ booking_info.booking.booking_id }}', '{{ vendor_name }}')">Delete</button>
+                                {% for booking_block in vendor_data.bookings %}
+                                    {% for date_row in booking_block.date_rows %}
+                                    <tr class="transition hover:bg-slate-50">
+                                        <td class="px-4 py-3 align-top">
+                                            <div class="font-semibold text-slate-900">
+                                                {{ date_row.date }}
+                                            </div>
+                                        </td>
+                                        <td class="px-4 py-3 align-top">
+                                            {% if date_row.gensets %}
+                                            <ul class="space-y-1">
+                                                {% for genset in date_row.gensets %}
+                                                <li class="text-slate-700">
+                                                    {{ genset.label }}
+                                                </li>
+                                                {% endfor %}
+                                            </ul>
+                                            {% else %}
+                                            <span class="text-xs text-slate-400">No gensets</span>
                                             {% endif %}
-                                        </div>
-                                    </td>
-                                </tr>
+                                        </td>
+                                        <td class="px-4 py-3 align-top text-center">
+                                            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold
+                                                {% if date_row.status_tone == 'confirmed' %}bg-emerald-100 text-emerald-700
+                                                {% elif date_row.status_tone == 'pending' %}bg-amber-100 text-amber-700
+                                                {% elif date_row.status_tone == 'cancelled' %}bg-rose-100 text-rose-700
+                                                {% elif date_row.status_tone == 'mixed' %}bg-slate-200 text-slate-700
+                                                {% else %}bg-slate-100 text-slate-700{% endif %}">
+                                                {{ date_row.status_label }}
+                                            </span>
+                                        </td>
+                                        {% if loop.first %}
+                                        <td rowspan="{{ booking_block.rowspan }}" class="px-4 py-3 align-top text-center">{{ booking_block.booking.created_at }}</td>
+                                        <td rowspan="{{ booking_block.rowspan }}" class="px-4 py-3 align-top text-center">
+                                            <div class="flex flex-wrap justify-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    class="js-view-booking rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white transition hover:bg-slate-800"
+                                                    data-booking-id="{{ booking_block.booking.booking_id }}"
+                                                    data-vendor-name="{{ vendor_name }}"
+                                                    data-vendor-id="{{ vendor_data.vendor_id }}"
+                                                >
+                                                    View
+                                                </button>
+                                            </div>
+                                        </td>
+                                        {% endif %}
+                                    </tr>
+                                    {% endfor %}
                                 {% endfor %}
                             </tbody>
                         </table>
@@ -93,6 +113,51 @@
     </div>
 </div>
 
+<div id="bookingViewOverlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
+    <div class="w-full max-w-4xl rounded-2xl bg-white shadow-xl">
+        <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Booking</div>
+                <div id="overlayVendor" class="mt-1 text-lg font-semibold text-slate-900">Loading...</div>
+                <div id="overlayBookingId" class="mt-1 text-xs text-slate-500"></div>
+            </div>
+            <button id="closeBookingOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                Close
+            </button>
+        </div>
+        <div class="space-y-4 px-6 py-5">
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Status</div>
+                    <div id="overlayStatus" class="mt-2"></div>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Created</div>
+                    <div id="overlayCreated" class="mt-2 text-sm font-semibold text-slate-900">-</div>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Vendor ID</div>
+                    <div id="overlayVendorId" class="mt-2 text-sm font-semibold text-slate-900">-</div>
+                </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div class="border-b border-slate-200 px-4 py-3">
+                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Assigned Generators</div>
+                </div>
+                <div id="overlayItems" class="max-h-[50vh] overflow-auto px-4 py-3 text-sm text-slate-700">
+                    Loading booking details...
+                </div>
+            </div>
+            <div class="flex justify-end border-t border-slate-200 pt-4">
+                <a id="overlayModifyLink" href="#" class="rounded-full bg-amber-400 px-4 py-2 text-xs font-semibold text-amber-950 transition hover:bg-amber-300">
+                    Modify
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 document.getElementById('bookingFilter')?.addEventListener('input', function() {
     const filter = this.value.trim().toUpperCase();
@@ -100,53 +165,202 @@ document.getElementById('bookingFilter')?.addEventListener('input', function() {
 
     vendorGroups.forEach(group => {
         const searchData = (group.dataset.search || '').toUpperCase();
-        const rows = group.querySelectorAll('tbody tr');
-        let hasVisibleRow = false;
         const vendorMatches = !filter || searchData.includes(filter);
-
-        if (vendorMatches) {
-            rows.forEach(row => {
-                row.style.display = '';
-            });
-            hasVisibleRow = rows.length > 0;
-        } else {
-            rows.forEach(row => {
-                const text = row.textContent.toUpperCase();
-                const isMatch = !filter || text.includes(filter);
-                row.style.display = isMatch ? '' : 'none';
-                if (isMatch) hasVisibleRow = true;
-            });
-        }
-
-        if (rows.length === 0) {
-            group.style.display = vendorMatches ? '' : 'none';
-        } else {
-            group.style.display = (vendorMatches || hasVisibleRow) ? '' : 'none';
-        }
+        group.style.display = vendorMatches ? '' : 'none';
     });
 });
 
-function deleteBooking(bookingId, vendorName) {
-    if (confirm(`Are you sure you want to delete this booking for ${vendorName}?\n\nBooking ID: ${bookingId}`)) {
-        fetch(`/api/bookings/${bookingId}`, {
-            method: 'DELETE'
-        })
-        .then(response => {
-            if (response.ok) {
-                alert('Booking deleted successfully');
-                location.reload();
-            } else if (response.status === 401) {
-                window.location.href = '/login';
-            } else {
-                return response.json().then(data => {
-                    alert('Error deleting booking: ' + (data.detail || 'Unknown error'));
-                });
-            }
-        })
-        .catch(error => {
-            alert('Error deleting booking: ' + error);
-        });
+const bookingOverlay = document.getElementById('bookingViewOverlay');
+const overlayBookingId = document.getElementById('overlayBookingId');
+const overlayVendor = document.getElementById('overlayVendor');
+const overlayStatus = document.getElementById('overlayStatus');
+const overlayCreated = document.getElementById('overlayCreated');
+const overlayVendorId = document.getElementById('overlayVendorId');
+const overlayItems = document.getElementById('overlayItems');
+const closeBookingOverlayBtn = document.getElementById('closeBookingOverlay');
+const overlayModifyLink = document.getElementById('overlayModifyLink');
+
+function statusBadgeClass(status) {
+    if (status === 'Confirmed') return 'bg-emerald-100 text-emerald-700';
+    if (status === 'Pending') return 'bg-amber-100 text-amber-700';
+    if (status === 'Cancelled') return 'bg-rose-100 text-rose-700';
+    return 'bg-slate-100 text-slate-700';
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function renderOverlayItems(items) {
+    if (!items || items.length === 0) {
+        overlayItems.innerHTML = '<div class="text-sm text-slate-500">No items in this booking.</div>';
+        return;
+    }
+
+    const grouped = {};
+    items.forEach(item => {
+        const bookedDate = item.start_dt ? item.start_dt.split(' ')[0] : 'N/A';
+        if (!grouped[bookedDate]) {
+            grouped[bookedDate] = {
+                generators: [],
+                statuses: [],
+                remarks: []
+            };
+        }
+        grouped[bookedDate].generators.push(item.generator_id || '-');
+        if (item.status) {
+            grouped[bookedDate].statuses.push(item.status);
+        }
+        const remarkText = (item.remarks || '').trim();
+        if (remarkText) {
+            grouped[bookedDate].remarks.push(remarkText);
+        }
+    });
+
+    const dateKeys = Object.keys(grouped).sort((a, b) => {
+        if (a === 'N/A') return 1;
+        if (b === 'N/A') return -1;
+        const aTs = Date.parse(a);
+        const bTs = Date.parse(b);
+        if (Number.isNaN(aTs) && Number.isNaN(bTs)) return a.localeCompare(b);
+        if (Number.isNaN(aTs)) return 1;
+        if (Number.isNaN(bTs)) return -1;
+        return aTs - bTs;
+    });
+
+    const rows = dateKeys.map(dateKey => {
+        const row = grouped[dateKey];
+        const distinctStatuses = Array.from(new Set(row.statuses));
+        let statusLabel = 'N/A';
+        if (distinctStatuses.length === 1) {
+            statusLabel = distinctStatuses[0];
+        } else if (distinctStatuses.length > 1) {
+            statusLabel = distinctStatuses.join(' / ');
+        }
+
+        const remarksLabel = row.remarks.length
+            ? Array.from(new Set(row.remarks)).join(' | ')
+            : '-';
+
+        const generatorList = row.generators.map(generatorId => (
+            `<li class="text-slate-700">${escapeHtml(generatorId)}</li>`
+        )).join('');
+
+        return `
+            <tr class="border-b border-slate-100 last:border-b-0">
+                <td class="px-3 py-2 font-semibold text-slate-900">${escapeHtml(dateKey)}</td>
+                <td class="px-3 py-2">
+                    <ul class="space-y-1 list-none m-0 p-0">${generatorList}</ul>
+                </td>
+                <td class="px-3 py-2">
+                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${statusBadgeClass(statusLabel)}">
+                        ${escapeHtml(statusLabel)}
+                    </span>
+                </td>
+                <td class="px-3 py-2">${escapeHtml(remarksLabel)}</td>
+            </tr>
+        `;
+    }).join('');
+
+    overlayItems.innerHTML = `
+        <table class="min-w-full text-sm">
+            <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                    <th class="px-3 py-2 text-left font-semibold">Booked Date</th>
+                    <th class="px-3 py-2 text-left font-semibold">Generators</th>
+                    <th class="px-3 py-2 text-left font-semibold">Status</th>
+                    <th class="px-3 py-2 text-left font-semibold">Remarks</th>
+                </tr>
+            </thead>
+            <tbody class="text-slate-700">
+                ${rows}
+            </tbody>
+        </table>
+    `;
+}
+
+function showBookingOverlay() {
+    if (!bookingOverlay) return;
+    bookingOverlay.classList.remove('hidden');
+    bookingOverlay.classList.add('flex');
+}
+
+function hideBookingOverlay() {
+    if (!bookingOverlay) return;
+    bookingOverlay.classList.add('hidden');
+    bookingOverlay.classList.remove('flex');
+}
+
+async function openBookingOverlay(button) {
+    const bookingId = button.getAttribute('data-booking-id') || '';
+    const vendorName = button.getAttribute('data-vendor-name') || '';
+    const vendorId = button.getAttribute('data-vendor-id') || '';
+    if (!bookingId) return;
+
+    overlayBookingId.textContent = bookingId;
+    overlayVendor.textContent = vendorName || '-';
+    overlayStatus.innerHTML = '<span class="text-sm text-slate-500">Loading...</span>';
+    overlayCreated.textContent = '-';
+    overlayVendorId.textContent = vendorId || '-';
+    overlayItems.innerHTML = '<div class="text-sm text-slate-500">Loading booking details...</div>';
+    if (overlayModifyLink) {
+        overlayModifyLink.href = `/booking/${encodeURIComponent(bookingId)}/edit`;
+    }
+    showBookingOverlay();
+
+    try {
+        const response = await fetch(`/api/bookings/${encodeURIComponent(bookingId)}`);
+        if (response.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+        const payload = await response.json();
+        if (!response.ok) {
+            overlayItems.innerHTML = `<div class="text-sm text-rose-700">${escapeHtml(payload.detail || 'Unable to load booking details.')}</div>`;
+            return;
+        }
+
+        const booking = payload.booking || {};
+        const resolvedBookingId = booking.id || bookingId;
+        overlayBookingId.textContent = resolvedBookingId;
+        overlayVendor.textContent = vendorName || booking.vendor_id || '-';
+        overlayVendorId.textContent = booking.vendor_id || vendorId || '-';
+        overlayCreated.textContent = booking.created_at || '-';
+        if (overlayModifyLink) {
+            overlayModifyLink.href = `/booking/${encodeURIComponent(resolvedBookingId)}/edit`;
+        }
+        overlayStatus.innerHTML = `
+            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadgeClass(booking.status)}">
+                ${escapeHtml(booking.status || 'N/A')}
+            </span>
+        `;
+        renderOverlayItems(payload.items || []);
+    } catch (error) {
+        overlayItems.innerHTML = '<div class="text-sm text-rose-700">Unable to load booking details.</div>';
     }
 }
+
+document.querySelectorAll('.js-view-booking').forEach(button => {
+    button.addEventListener('click', () => openBookingOverlay(button));
+});
+
+closeBookingOverlayBtn?.addEventListener('click', hideBookingOverlay);
+
+bookingOverlay?.addEventListener('click', function(event) {
+    if (event.target === bookingOverlay) {
+        hideBookingOverlay();
+    }
+});
+
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        hideBookingOverlay();
+    }
+});
 </script>
 {% endblock %}

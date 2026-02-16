@@ -166,6 +166,142 @@ if os.path.exists(static_dir):
 
 templates = Jinja2Templates(directory=template_dir)
 
+
+def _fetch_booking_items_with_capacity(
+    conn: sqlite3.Connection,
+    booking_id: str,
+) -> List[Dict[str, Any]]:
+    """Return booking items with optional generator capacity metadata."""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT bi.generator_id,
+               bi.start_dt,
+               bi.item_status,
+               bi.remarks,
+               g.capacity_kva
+        FROM booking_items bi
+        LEFT JOIN generators g ON g.generator_id = bi.generator_id
+        WHERE bi.booking_id = ?
+        ORDER BY bi.start_dt ASC, bi.id ASC
+        """,
+        (booking_id,),
+    )
+
+    items: List[Dict[str, Any]] = []
+    for row in cur.fetchall():
+        items.append(
+            {
+                "generator_id": row[0] or "",
+                "start_dt": row[1] or "",
+                "item_status": row[2] or "",
+                "remarks": row[3] or "",
+                "capacity_kva": row[4],
+            }
+        )
+    return items
+
+
+def _build_booking_date_rows(
+    conn: sqlite3.Connection,
+    booking_id: str,
+) -> List[Dict[str, Any]]:
+    """Group booking items by booked date and format date-row details."""
+    items = _fetch_booking_items_with_capacity(conn, booking_id)
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+
+    for item in items:
+        start_dt = item.get("start_dt", "")
+        date_key = "N/A"
+        if start_dt:
+            candidate = start_dt.split()[0]
+            if candidate:
+                try:
+                    datetime.strptime(candidate, "%Y-%m-%d")
+                    date_key = candidate
+                except ValueError:
+                    date_key = "N/A"
+
+        grouped.setdefault(date_key, []).append(item)
+
+    date_keys = sorted(key for key in grouped if key != "N/A")
+    if "N/A" in grouped:
+        date_keys.append("N/A")
+
+    rows: List[Dict[str, Any]] = []
+    for date_key in date_keys:
+        gensets = []
+        status_values: List[str] = []
+        for item in grouped[date_key]:
+            generator_id = item.get("generator_id") or "Unknown"
+            capacity_kva = item.get("capacity_kva")
+            if capacity_kva is not None:
+                label = f"{generator_id} ({capacity_kva} kVA)"
+            else:
+                label = generator_id
+
+            item_status = (item.get("item_status") or "").strip()
+            if item_status:
+                status_values.append(item_status)
+
+            gensets.append(
+                {
+                    "generator_id": generator_id,
+                    "capacity_kva": capacity_kva,
+                    "label": label,
+                    "item_status": item_status,
+                    "remarks": item.get("remarks", ""),
+                    "start_dt": item.get("start_dt", ""),
+                }
+            )
+
+        distinct_statuses = sorted(set(status_values))
+        if not distinct_statuses:
+            status_label = "N/A"
+            status_tone = "unknown"
+        elif len(distinct_statuses) == 1:
+            status_label = distinct_statuses[0]
+            if status_label == STATUS_CONFIRMED:
+                status_tone = "confirmed"
+            elif status_label == STATUS_PENDING:
+                status_tone = "pending"
+            elif status_label == STATUS_CANCELLED:
+                status_tone = "cancelled"
+            else:
+                status_tone = "mixed"
+        else:
+            status_label = " / ".join(distinct_statuses)
+            status_tone = "mixed"
+
+        rows.append(
+            {
+                "date": date_key,
+                "gensets": gensets,
+                "status_label": status_label,
+                "status_tone": status_tone,
+            }
+        )
+
+    if not rows:
+        rows = [{
+            "date": "N/A",
+            "gensets": [],
+            "status_label": "N/A",
+            "status_tone": "unknown",
+        }]
+
+    return rows
+
+
+def _build_booking_tree_block(conn: sqlite3.Connection, booking: Any) -> Dict[str, Any]:
+    """Build the booking block shape required by the tree-style bookings table."""
+    date_rows = _build_booking_date_rows(conn, booking.booking_id)
+    return {
+        "booking": booking,
+        "rowspan": max(1, len(date_rows)),
+        "date_rows": date_rows,
+    }
+
 def template_context(request: Request, **kwargs: Any) -> Dict[str, Any]:
     """Standard template context with user attached."""
     context = {
@@ -829,7 +965,7 @@ async def bookings_page(request: Request, conn: sqlite3.Connection = Depends(get
         
         bookings = booking_repo.get_all()
         
-        # Group bookings by vendor with booked dates
+        # Group bookings by vendor with booking blocks and date-level rows.
         bookings_by_vendor = {}
         for booking in bookings:
             vendor = vendor_repo.get_by_id(booking.vendor_id)
@@ -840,24 +976,10 @@ async def bookings_page(request: Request, conn: sqlite3.Connection = Depends(get
                     "vendor_id": booking.vendor_id,
                     "bookings": []
                 }
-            
-            items = booking_repo.get_items(booking.booking_id)
-            
-            # Extract unique dates from items
-            booked_dates = set()
-            for item in items:
-                # Extract date from start_dt (YYYY-MM-DD HH:MM format)
-                date_part = item.start_dt.split()[0]
-                booked_dates.add(date_part)
-            
-            booked_dates_str = ", ".join(sorted(booked_dates)) if booked_dates else "N/A"
-            
-            bookings_by_vendor[vendor_name]["bookings"].append({
-                "booking": booking,
-                "items": items,
-                "item_count": len(items),
-                "booked_dates": booked_dates_str
-            })
+
+            bookings_by_vendor[vendor_name]["bookings"].append(
+                _build_booking_tree_block(conn, booking)
+            )
         
         # Sort vendors alphabetically
         sorted_vendors = sorted(bookings_by_vendor.items())
