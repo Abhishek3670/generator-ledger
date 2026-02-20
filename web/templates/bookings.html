@@ -13,17 +13,62 @@
 
         {% if bookings_by_vendor %}
         <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <input
-                type="text"
-                id="bookingFilter"
-                placeholder="Search by Vendor name or ID"
-                class="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
-            >
+            <div class="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+                <div>
+                    <label for="bookingFilter" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Search</label>
+                    <input
+                        type="text"
+                        id="bookingFilter"
+                        placeholder="Search vendor, booking ID, date, generator, status, created"
+                        class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                    >
+                </div>
+                <div>
+                    <label for="bookingStatusFilter" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Status</label>
+                    <select
+                        id="bookingStatusFilter"
+                        class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                    >
+                        <option value="all">All</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="pending">Pending</option>
+                        <option value="cancelled">Cancelled</option>
+                        <option value="mixed">Mixed</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="bookingDateFrom" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Date From</label>
+                    <input
+                        type="date"
+                        id="bookingDateFrom"
+                        class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                    >
+                </div>
+                <div>
+                    <label for="bookingDateTo" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Date To</label>
+                    <input
+                        type="date"
+                        id="bookingDateTo"
+                        class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                    >
+                </div>
+                <button
+                    id="clearBookingFilters"
+                    type="button"
+                    class="rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                >
+                    Clear
+                </button>
+            </div>
+            <div id="bookingFilterError" class="mt-3 hidden rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"></div>
         </div>
 
         <div class="mt-6 space-y-6">
             {% for vendor_name, vendor_data in bookings_by_vendor %}
-            <div class="vendor-group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" data-search="{{ vendor_name | lower }} {{ vendor_data.vendor_id | lower }}">
+            <div
+                class="vendor-group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                data-vendor-search="{{ (vendor_name ~ ' ' ~ vendor_data.vendor_id) | lower }}"
+            >
                 <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-900 px-5 py-4 text-white">
                     <div class="text-sm font-semibold">{{ vendor_name }}</div>
                     <div class="text-xs text-white/70">{{ vendor_data.vendor_id }}</div>
@@ -31,7 +76,7 @@
 
                 <div class="p-5">
                     {% if vendor_data.bookings %}
-                    <div class="overflow-x-auto">
+                    <div class="js-bookings-table-wrap overflow-x-auto">
                         <table class="min-w-full text-sm">
                             <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                                 <tr>
@@ -45,7 +90,19 @@
                             <tbody class="divide-y divide-slate-100 text-slate-700">
                                 {% for booking_block in vendor_data.bookings %}
                                     {% for date_row in booking_block.date_rows %}
-                                    <tr class="transition hover:bg-slate-50">
+                                    {% set gensets_search = date_row.gensets | map(attribute='label') | join(' ') if date_row.gensets else 'No gensets' %}
+                                    <tr
+                                        class="js-booking-row transition hover:bg-slate-50"
+                                        data-vendor-name="{{ vendor_name }}"
+                                        data-vendor-id="{{ vendor_data.vendor_id }}"
+                                        data-booking-id="{{ booking_block.booking.booking_id }}"
+                                        data-booked-date="{{ date_row.date }}"
+                                        data-status-label="{{ date_row.status_label }}"
+                                        data-status-tone="{{ date_row.status_tone }}"
+                                        data-created-at="{{ booking_block.booking.created_at }}"
+                                        data-generators="{{ gensets_search }}"
+                                        data-search="{{ (vendor_name ~ ' ' ~ vendor_data.vendor_id ~ ' ' ~ booking_block.booking.booking_id ~ ' ' ~ date_row.date ~ ' ' ~ date_row.status_label ~ ' ' ~ booking_block.booking.created_at ~ ' ' ~ gensets_search) | lower }}"
+                                    >
                                         <td class="px-4 py-3 align-top">
                                             <div class="font-semibold text-slate-900">
                                                 {{ date_row.date }}
@@ -95,6 +152,9 @@
                                 {% endfor %}
                             </tbody>
                         </table>
+                    </div>
+                    <div class="js-vendor-empty mt-3 hidden rounded-xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
+                        No matching bookings for current filters.
                     </div>
                     {% else %}
                     <div class="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
@@ -159,15 +219,224 @@
 </div>
 
 <script>
-document.getElementById('bookingFilter')?.addEventListener('input', function() {
-    const filter = this.value.trim().toUpperCase();
-    const vendorGroups = document.querySelectorAll('[data-search]');
+const bookingFilterInput = document.getElementById('bookingFilter');
+const bookingStatusFilter = document.getElementById('bookingStatusFilter');
+const bookingDateFromInput = document.getElementById('bookingDateFrom');
+const bookingDateToInput = document.getElementById('bookingDateTo');
+const clearBookingFiltersButton = document.getElementById('clearBookingFilters');
+const bookingFilterError = document.getElementById('bookingFilterError');
+const vendorGroups = document.querySelectorAll('.vendor-group');
+
+const FILTER_QUERY_KEYS = {
+    q: 'q',
+    status: 'status',
+    from: 'from',
+    to: 'to'
+};
+const STATUS_ALL = 'all';
+const VALID_STATUSES = new Set(['all', 'confirmed', 'pending', 'cancelled', 'mixed']);
+
+function normalizeText(value) {
+    return String(value ?? '').trim().toLowerCase();
+}
+
+function isValidIsoDate(value) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function sanitizeDate(value) {
+    const trimmed = String(value ?? '').trim();
+    return isValidIsoDate(trimmed) ? trimmed : '';
+}
+
+function readFiltersFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const statusRaw = normalizeText(params.get(FILTER_QUERY_KEYS.status) || STATUS_ALL);
+    return {
+        q: String(params.get(FILTER_QUERY_KEYS.q) || '').trim(),
+        status: VALID_STATUSES.has(statusRaw) ? statusRaw : STATUS_ALL,
+        from: sanitizeDate(params.get(FILTER_QUERY_KEYS.from) || ''),
+        to: sanitizeDate(params.get(FILTER_QUERY_KEYS.to) || '')
+    };
+}
+
+function writeFiltersToInputs(filters) {
+    if (bookingFilterInput) {
+        bookingFilterInput.value = filters.q;
+    }
+    if (bookingStatusFilter) {
+        bookingStatusFilter.value = filters.status;
+    }
+    if (bookingDateFromInput) {
+        bookingDateFromInput.value = filters.from;
+    }
+    if (bookingDateToInput) {
+        bookingDateToInput.value = filters.to;
+    }
+}
+
+function readFiltersFromInputs() {
+    const statusRaw = normalizeText(bookingStatusFilter?.value || STATUS_ALL);
+    return {
+        q: String(bookingFilterInput?.value || '').trim(),
+        status: VALID_STATUSES.has(statusRaw) ? statusRaw : STATUS_ALL,
+        from: sanitizeDate(bookingDateFromInput?.value || ''),
+        to: sanitizeDate(bookingDateToInput?.value || '')
+    };
+}
+
+function updateUrlWithFilters(filters) {
+    const params = new URLSearchParams(window.location.search);
+
+    const setOrDelete = (key, value) => {
+        if (value) {
+            params.set(key, value);
+        } else {
+            params.delete(key);
+        }
+    };
+
+    setOrDelete(FILTER_QUERY_KEYS.q, filters.q);
+    setOrDelete(
+        FILTER_QUERY_KEYS.status,
+        filters.status && filters.status !== STATUS_ALL ? filters.status : ''
+    );
+    setOrDelete(FILTER_QUERY_KEYS.from, filters.from);
+    setOrDelete(FILTER_QUERY_KEYS.to, filters.to);
+
+    const queryString = params.toString();
+    const nextUrl = queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname;
+    window.history.replaceState({}, '', nextUrl);
+}
+
+function setRangeError(message) {
+    if (!bookingFilterError) return;
+    if (!message) {
+        bookingFilterError.classList.add('hidden');
+        bookingFilterError.textContent = '';
+        return;
+    }
+    bookingFilterError.textContent = message;
+    bookingFilterError.classList.remove('hidden');
+}
+
+function getStatusTokens(row) {
+    const label = normalizeText(row.dataset.statusLabel || '');
+    if (!label) return [];
+    return label
+        .split('/')
+        .map(token => token.trim())
+        .filter(Boolean);
+}
+
+function rowMatchesStatus(row, selectedStatus) {
+    if (!selectedStatus || selectedStatus === STATUS_ALL) {
+        return true;
+    }
+
+    const statusTokens = getStatusTokens(row);
+    const statusTone = normalizeText(row.dataset.statusTone || '');
+
+    if (selectedStatus === 'mixed') {
+        return statusTone === 'mixed' || statusTokens.length > 1;
+    }
+
+    return statusTokens.includes(selectedStatus);
+}
+
+function rowMatchesDate(row, fromDate, toDate, shouldApplyDateFilter) {
+    if (!fromDate && !toDate) {
+        return true;
+    }
+    if (!shouldApplyDateFilter) {
+        return true;
+    }
+
+    const bookedDate = sanitizeDate(row.dataset.bookedDate || '');
+    if (!bookedDate) {
+        return false;
+    }
+    if (fromDate && bookedDate < fromDate) {
+        return false;
+    }
+    if (toDate && bookedDate > toDate) {
+        return false;
+    }
+    return true;
+}
+
+function applyBookingFilters({ syncUrl = true } = {}) {
+    const filters = readFiltersFromInputs();
+    const normalizedQuery = normalizeText(filters.q);
+    const hasRangeError = Boolean(filters.from && filters.to && filters.from > filters.to);
+    const shouldApplyDateFilter = !hasRangeError;
+
+    setRangeError(
+        hasRangeError
+            ? 'Invalid date range: "Date From" cannot be later than "Date To".'
+            : ''
+    );
 
     vendorGroups.forEach(group => {
-        const searchData = (group.dataset.search || '').toUpperCase();
-        const vendorMatches = !filter || searchData.includes(filter);
-        group.style.display = vendorMatches ? '' : 'none';
+        const rows = group.querySelectorAll('.js-booking-row');
+        const tableWrap = group.querySelector('.js-bookings-table-wrap');
+        const emptyState = group.querySelector('.js-vendor-empty');
+
+        if (!rows.length) {
+            return;
+        }
+
+        let visibleRows = 0;
+
+        rows.forEach(row => {
+            const rowSearchText = normalizeText(row.dataset.search || '');
+            const textMatch = !normalizedQuery || rowSearchText.includes(normalizedQuery);
+            const statusMatch = rowMatchesStatus(row, filters.status);
+            const dateMatch = rowMatchesDate(
+                row,
+                filters.from,
+                filters.to,
+                shouldApplyDateFilter
+            );
+
+            const isVisible = textMatch && statusMatch && dateMatch;
+            row.style.display = isVisible ? '' : 'none';
+            if (isVisible) {
+                visibleRows += 1;
+            }
+        });
+
+        if (tableWrap) {
+            tableWrap.style.display = visibleRows > 0 ? '' : 'none';
+        }
+        if (emptyState) {
+            emptyState.classList.toggle('hidden', visibleRows > 0);
+        }
     });
+
+    if (syncUrl) {
+        updateUrlWithFilters(filters);
+    }
+}
+
+const initialFilters = readFiltersFromUrl();
+writeFiltersToInputs(initialFilters);
+applyBookingFilters({ syncUrl: false });
+
+bookingFilterInput?.addEventListener('input', () => applyBookingFilters());
+bookingStatusFilter?.addEventListener('change', () => applyBookingFilters());
+bookingDateFromInput?.addEventListener('change', () => applyBookingFilters());
+bookingDateToInput?.addEventListener('change', () => applyBookingFilters());
+
+clearBookingFiltersButton?.addEventListener('click', () => {
+    writeFiltersToInputs({
+        q: '',
+        status: STATUS_ALL,
+        from: '',
+        to: ''
+    });
+    setRangeError('');
+    applyBookingFilters();
 });
 
 const bookingOverlay = document.getElementById('bookingViewOverlay');
