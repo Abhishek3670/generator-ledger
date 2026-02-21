@@ -132,8 +132,8 @@
                                             </span>
                                         </td>
                                         {% if loop.first %}
-                                        <td rowspan="{{ booking_block.rowspan }}" class="px-4 py-3 align-top text-center">{{ booking_block.booking.created_at }}</td>
-                                        <td rowspan="{{ booking_block.rowspan }}" class="px-4 py-3 align-top text-center">
+                                        <td rowspan="{{ booking_block.rowspan }}" class="js-booking-created-cell px-4 py-3 align-top text-center">{{ booking_block.booking.created_at }}</td>
+                                        <td rowspan="{{ booking_block.rowspan }}" class="js-booking-action-cell px-4 py-3 align-top text-center">
                                             <div class="flex flex-wrap justify-center gap-2">
                                                 <button
                                                     type="button"
@@ -152,9 +152,6 @@
                                 {% endfor %}
                             </tbody>
                         </table>
-                    </div>
-                    <div class="js-vendor-empty mt-3 hidden rounded-xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
-                        No matching bookings for current filters.
                     </div>
                     {% else %}
                     <div class="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
@@ -378,15 +375,30 @@ function applyBookingFilters({ syncUrl = true } = {}) {
     );
 
     vendorGroups.forEach(group => {
-        const rows = group.querySelectorAll('.js-booking-row');
+        const rows = Array.from(group.querySelectorAll('.js-booking-row'));
         const tableWrap = group.querySelector('.js-bookings-table-wrap');
-        const emptyState = group.querySelector('.js-vendor-empty');
 
         if (!rows.length) {
             return;
         }
 
-        let visibleRows = 0;
+        const bookingBlocks = [];
+        const rowToBlock = new Map();
+
+        rows.forEach((row, index) => {
+            const key = row.dataset.bookingId || `__row_${index}`;
+            let block = bookingBlocks.find(item => item.key === key);
+            if (!block) {
+                block = {
+                    key,
+                    rows: [],
+                    hasVisible: false
+                };
+                bookingBlocks.push(block);
+            }
+            block.rows.push(row);
+            rowToBlock.set(row, block);
+        });
 
         rows.forEach(row => {
             const rowSearchText = normalizeText(row.dataset.search || '');
@@ -401,17 +413,54 @@ function applyBookingFilters({ syncUrl = true } = {}) {
 
             const isVisible = textMatch && statusMatch && dateMatch;
             row.style.display = isVisible ? '' : 'none';
-            if (isVisible) {
-                visibleRows += 1;
+
+            const block = rowToBlock.get(row);
+            if (block && isVisible) {
+                block.hasVisible = true;
             }
         });
+
+        bookingBlocks.forEach(block => {
+            const anchorRow = block.rows[0];
+            const createdCell = anchorRow.querySelector('.js-booking-created-cell');
+            const actionCell = anchorRow.querySelector('.js-booking-action-cell');
+
+            if (block.hasVisible) {
+                if (anchorRow.style.display === 'none') {
+                    anchorRow.style.display = '';
+                }
+                const visibleInBlock = block.rows.filter(row => row.style.display !== 'none').length;
+                const rowspan = Math.max(1, visibleInBlock);
+                if (createdCell) {
+                    createdCell.rowSpan = rowspan;
+                }
+                if (actionCell) {
+                    actionCell.rowSpan = rowspan;
+                }
+            } else {
+                block.rows.forEach(row => {
+                    row.style.display = 'none';
+                });
+            }
+        });
+
+        const tbody = rows[0].closest('tbody');
+        if (tbody) {
+            const visibleBlocks = bookingBlocks.filter(block => block.hasVisible);
+            const hiddenBlocks = bookingBlocks.filter(block => !block.hasVisible);
+            [...visibleBlocks, ...hiddenBlocks].forEach(block => {
+                block.rows.forEach(row => {
+                    tbody.appendChild(row);
+                });
+            });
+        }
+
+        const visibleRows = rows.filter(row => row.style.display !== 'none').length;
 
         if (tableWrap) {
             tableWrap.style.display = visibleRows > 0 ? '' : 'none';
         }
-        if (emptyState) {
-            emptyState.classList.toggle('hidden', visibleRows > 0);
-        }
+        group.style.display = visibleRows > 0 ? '' : 'none';
     });
 
     if (syncUrl) {
