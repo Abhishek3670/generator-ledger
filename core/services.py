@@ -512,7 +512,7 @@ class BookingService:
         """Cancel a booking."""
         self.logger.info(f"Cancelling booking | context={{'booking_id': '{booking_id}', 'reason': '{reason}'}}")
         try:
-            ensure_booking(self.booking_repo, booking_id)
+            booking = ensure_booking(self.booking_repo, booking_id)
         except ValueError as e:
             self.logger.warning(f"Cancellation failed | context={{'booking_id': '{booking_id}', 'reason': 'not found'}}")
             return False, str(e)

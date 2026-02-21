@@ -109,9 +109,11 @@ def test_booking_tree_block_falls_back_to_na_for_invalid_dates(app_module_and_co
     web_app_module, conn = app_module_and_conn
 
     vendor_repo = VendorRepository(conn)
+    generator_repo = GeneratorRepository(conn)
     booking_repo = BookingRepository(conn)
 
     vendor_repo.save(Vendor(vendor_id="VEN001", vendor_name="Vendor One"))
+    generator_repo.save(Generator(generator_id="GEN-UNKNOWN", capacity_kva=45))
 
     booking = Booking(
         booking_id="BKG-20260221-00001",
@@ -135,7 +137,7 @@ def test_booking_tree_block_falls_back_to_na_for_invalid_dates(app_module_and_co
     assert block["rowspan"] == 1
     assert len(block["date_rows"]) == 1
     assert block["date_rows"][0]["date"] == "N/A"
-    assert block["date_rows"][0]["gensets"][0]["label"] == "GEN-UNKNOWN"
+    assert block["date_rows"][0]["gensets"][0]["label"] == "GEN-UNKNOWN (45 kVA)"
     assert block["date_rows"][0]["status_label"] == "Confirmed"
     assert block["date_rows"][0]["status_tone"] == "confirmed"
 
