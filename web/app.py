@@ -2,7 +2,7 @@
 FastAPI web application for Generator Booking Ledger.
 """
 
-from fastapi import FastAPI, Request, HTTPException, Form, Depends
+from fastapi import FastAPI, Request, HTTPException, Form, Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -993,6 +993,19 @@ async def bookings_page(request: Request, conn: sqlite3.Connection = Depends(get
         return templates.TemplateResponse("error.html", template_context(request, error=str(e)))
 
 
+@app.get("/billing", response_class=HTMLResponse)
+async def billing_page(
+    request: Request,
+    _: Any = Depends(require_role(ROLE_ADMIN, ROLE_OPERATOR)),
+):
+    """Billing preview page."""
+    try:
+        return templates.TemplateResponse("billing.html", template_context(request))
+    except Exception as e:
+        logger.error(f"Error loading billing page: {e}", exc_info=True)
+        return templates.TemplateResponse("error.html", template_context(request, error=str(e)))
+
+
 @app.get("/history", response_class=HTMLResponse)
 async def history_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     """Booking history page."""
@@ -1767,6 +1780,96 @@ async def api_bookings(conn: sqlite3.Connection = Depends(get_db)):
         ]
     except Exception as e:
         logger.error(f"Error fetching bookings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/billing/lines")
+async def api_billing_lines(
+    from_date: str = Query(..., alias="from"),
+    to_date: str = Query(..., alias="to"),
+    _: Any = Depends(require_role(ROLE_ADMIN, ROLE_OPERATOR)),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Get billable booking lines by date range (confirmed records only)."""
+    try:
+        try:
+            from_parsed = datetime.strptime(from_date, "%Y-%m-%d")
+            to_parsed = datetime.strptime(to_date, "%Y-%m-%d")
+        except ValueError:
+            logger.warning(
+                "Billing lines validation failed | context="
+                f"{{'from': '{from_date}', 'to': '{to_date}', 'reason': 'invalid date format'}}"
+            )
+            raise HTTPException(status_code=400, detail="Invalid date format (YYYY-MM-DD)")
+
+        if from_parsed > to_parsed:
+            logger.warning(
+                "Billing lines validation failed | context="
+                f"{{'from': '{from_date}', 'to': '{to_date}', 'reason': 'invalid range'}}"
+            )
+            raise HTTPException(status_code=400, detail='"from" cannot be later than "to"')
+
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT v.vendor_id,
+                   v.vendor_name,
+                   b.booking_id,
+                   date(bi.start_dt) AS booked_date,
+                   bi.generator_id,
+                   g.capacity_kva
+            FROM booking_items bi
+            JOIN bookings b ON b.booking_id = bi.booking_id
+            JOIN vendors v ON v.vendor_id = b.vendor_id
+            LEFT JOIN generators g ON g.generator_id = bi.generator_id
+            WHERE date(bi.start_dt) >= ?
+              AND date(bi.start_dt) <= ?
+              AND bi.item_status = ?
+              AND b.status = ?
+            ORDER BY v.vendor_name ASC,
+                     v.vendor_id ASC,
+                     date(bi.start_dt) ASC,
+                     bi.generator_id ASC,
+                     b.booking_id ASC,
+                     bi.id ASC
+            """,
+            (from_date, to_date, STATUS_CONFIRMED, STATUS_CONFIRMED),
+        )
+
+        rows: List[Dict[str, Any]] = []
+        capacities: set[int] = set()
+
+        for row in cur.fetchall():
+            capacity_kva = row[5]
+            if isinstance(capacity_kva, int):
+                capacities.add(capacity_kva)
+
+            rows.append(
+                {
+                    "vendor_id": row[0],
+                    "vendor_name": row[1],
+                    "booking_id": row[2],
+                    "booked_date": row[3],
+                    "generator_id": row[4],
+                    "capacity_kva": capacity_kva,
+                }
+            )
+
+        logger.info(
+            "Billing lines fetched | context="
+            f"{{'from': '{from_date}', 'to': '{to_date}', 'count': {len(rows)}}}"
+        )
+        return {
+            "from": from_date,
+            "to": to_date,
+            "rows": rows,
+            "capacities": sorted(capacities),
+            "count": len(rows),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching billing lines: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

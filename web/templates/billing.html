@@ -1,0 +1,470 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+    @media print {
+        @page {
+            margin: 12mm;
+        }
+        nav,
+        footer,
+        #loadBillingData,
+        #billingPrintButton,
+        #billingFilterError,
+        #billingRatesSection,
+        #billingStateMessage {
+            display: none !important;
+        }
+        body,
+        .min-h-screen {
+            background: #ffffff !important;
+            min-height: auto !important;
+        }
+        .overflow-x-auto {
+            overflow: visible !important;
+        }
+        #billingTable {
+            display: table !important;
+            width: 100% !important;
+            font-size: 12px !important;
+        }
+        #billingTable th,
+        #billingTable td {
+            padding: 6px !important;
+        }
+        #billingSummary {
+            display: block !important;
+            margin-bottom: 8px !important;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100">
+    <div class="mx-auto max-w-6xl px-4 py-10 lg:py-12" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Billing</div>
+                <h1 class="mt-2 text-2xl font-semibold text-slate-900">Billing Preview</h1>
+                <p class="mt-1 text-sm text-slate-500">Calculate vendor totals from confirmed bookings using session-only pricing.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] sm:items-end">
+                <div>
+                    <label for="billingDateFrom" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Date From</label>
+                    <input
+                        type="date"
+                        id="billingDateFrom"
+                        class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                    >
+                </div>
+                <div>
+                    <label for="billingDateTo" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Date To</label>
+                    <input
+                        type="date"
+                        id="billingDateTo"
+                        class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                    >
+                </div>
+                <button
+                    id="loadBillingData"
+                    type="button"
+                    class="rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                    Load
+                </button>
+                <button
+                    id="billingPrintButton"
+                    type="button"
+                    class="rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+                >
+                    Print
+                </button>
+            </div>
+            <div id="billingFilterError" class="mt-3 hidden rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"></div>
+        </div>
+
+        <div id="billingRatesSection" class="mt-6 hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Price Per Capacity</div>
+            <p class="mt-2 text-sm text-slate-500">Rates are temporary and reset on refresh or navigation.</p>
+            <div id="billingRateInputs" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"></div>
+        </div>
+
+        <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div id="billingStateMessage" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                Select date range and load data.
+            </div>
+            <div id="billingSummary" class="mt-4 hidden text-sm text-slate-500"></div>
+            <div class="mt-4 overflow-x-auto">
+                <table id="billingTable" class="hidden min-w-full text-sm">
+                    <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                        <tr>
+                            <th class="px-3 py-3 text-left font-semibold">Vendor</th>
+                            <th class="px-3 py-3 text-left font-semibold">Booked Date</th>
+                            <th class="px-3 py-3 text-left font-semibold">Generator (Capacity)</th>
+                            <th class="px-3 py-3 text-right font-semibold">Price / Capacity</th>
+                            <th class="px-3 py-3 text-right font-semibold">Line Amount</th>
+                            <th class="px-3 py-3 text-right font-semibold">Vendor Total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="billingTableBody" class="divide-y divide-slate-100 text-slate-700"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const fromInput = document.getElementById('billingDateFrom');
+    const toInput = document.getElementById('billingDateTo');
+    const loadButton = document.getElementById('loadBillingData');
+    const printButton = document.getElementById('billingPrintButton');
+    const filterError = document.getElementById('billingFilterError');
+    const ratesSection = document.getElementById('billingRatesSection');
+    const rateInputsContainer = document.getElementById('billingRateInputs');
+    const stateMessage = document.getElementById('billingStateMessage');
+    const summaryEl = document.getElementById('billingSummary');
+    const table = document.getElementById('billingTable');
+    const tableBody = document.getElementById('billingTableBody');
+
+    const moneyFormatter = new Intl.NumberFormat('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+
+    const state = {
+        rows: [],
+        capacities: [],
+        ratesByCapacity: {},
+        selectedFrom: '',
+        selectedTo: ''
+    };
+
+    function isValidIsoDate(value) {
+        return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
+    }
+
+    function sanitizeDate(value) {
+        const trimmed = String(value || '').trim();
+        return isValidIsoDate(trimmed) ? trimmed : '';
+    }
+
+    function sanitizeRate(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num) || num < 0) {
+            return 0;
+        }
+        return num;
+    }
+
+    function formatMoney(value) {
+        return moneyFormatter.format(sanitizeRate(value));
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function setFilterError(message) {
+        if (!filterError) return;
+        if (!message) {
+            filterError.textContent = '';
+            filterError.classList.add('hidden');
+            return;
+        }
+        filterError.textContent = message;
+        filterError.classList.remove('hidden');
+    }
+
+    function setStateMessage(message, tone) {
+        if (!stateMessage) return;
+        stateMessage.textContent = message;
+        stateMessage.classList.remove(
+            'border-slate-200',
+            'bg-slate-50',
+            'text-slate-600',
+            'border-rose-200',
+            'bg-rose-50',
+            'text-rose-700',
+            'border-emerald-200',
+            'bg-emerald-50',
+            'text-emerald-700'
+        );
+        if (tone === 'error') {
+            stateMessage.classList.add('border-rose-200', 'bg-rose-50', 'text-rose-700');
+            return;
+        }
+        if (tone === 'success') {
+            stateMessage.classList.add('border-emerald-200', 'bg-emerald-50', 'text-emerald-700');
+            return;
+        }
+        stateMessage.classList.add('border-slate-200', 'bg-slate-50', 'text-slate-600');
+    }
+
+    function getRateForCapacity(capacity) {
+        const key = String(capacity);
+        return sanitizeRate(state.ratesByCapacity[key]);
+    }
+
+    function getCapacityValue(row) {
+        if (Number.isInteger(row.capacity_kva)) {
+            return row.capacity_kva;
+        }
+        if (typeof row.capacity_kva === 'number' && Number.isFinite(row.capacity_kva)) {
+            return row.capacity_kva;
+        }
+        return null;
+    }
+
+    function syncRatesWithCapacities() {
+        const nextRates = {};
+        state.capacities.forEach(capacity => {
+            const key = String(capacity);
+            nextRates[key] = sanitizeRate(state.ratesByCapacity[key]);
+        });
+        state.ratesByCapacity = nextRates;
+    }
+
+    function renderRateInputs() {
+        if (!ratesSection || !rateInputsContainer) return;
+        if (!state.capacities.length) {
+            ratesSection.classList.add('hidden');
+            rateInputsContainer.innerHTML = '';
+            return;
+        }
+
+        ratesSection.classList.remove('hidden');
+        rateInputsContainer.innerHTML = state.capacities.map(capacity => {
+            const key = String(capacity);
+            const currentValue = sanitizeRate(state.ratesByCapacity[key]);
+            return `
+                <label class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">${escapeHtml(capacity)} kVA</div>
+                    <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputmode="decimal"
+                        data-capacity="${escapeHtml(key)}"
+                        value="${escapeHtml(currentValue)}"
+                        class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                    >
+                </label>
+            `;
+        }).join('');
+
+        rateInputsContainer.querySelectorAll('input[data-capacity]').forEach(input => {
+            input.addEventListener('input', () => {
+                const capacityKey = input.getAttribute('data-capacity') || '';
+                state.ratesByCapacity[capacityKey] = sanitizeRate(input.value);
+                renderTable();
+            });
+        });
+    }
+
+    function groupRowsByVendor(rows) {
+        const orderedGroups = [];
+        const groupMap = new Map();
+
+        rows.forEach(row => {
+            const vendorId = String(row.vendor_id || '');
+            const vendorName = String(row.vendor_name || '');
+            const key = `${vendorName}__${vendorId}`;
+            if (!groupMap.has(key)) {
+                const group = {
+                    vendor_id: vendorId,
+                    vendor_name: vendorName,
+                    rows: []
+                };
+                groupMap.set(key, group);
+                orderedGroups.push(group);
+            }
+            groupMap.get(key).rows.push(row);
+        });
+
+        return orderedGroups;
+    }
+
+    function renderTable() {
+        if (!table || !tableBody || !summaryEl) return;
+
+        if (!state.rows.length) {
+            table.classList.add('hidden');
+            summaryEl.classList.add('hidden');
+            setStateMessage('No confirmed bookings in selected range.', 'info');
+            tableBody.innerHTML = '';
+            return;
+        }
+
+        const vendorGroups = groupRowsByVendor(state.rows);
+        let grandTotal = 0;
+        const tableRows = [];
+
+        vendorGroups.forEach(group => {
+            let vendorTotal = 0;
+
+            group.rows.forEach(line => {
+                const capacity = getCapacityValue(line);
+                const hasKnownCapacity = capacity !== null;
+                const rateValue = hasKnownCapacity ? getRateForCapacity(capacity) : 0;
+                const lineAmount = hasKnownCapacity ? rateValue : 0;
+                if (hasKnownCapacity) {
+                    vendorTotal += lineAmount;
+                }
+
+                const vendorLabel = `${line.vendor_name || '-'} (${line.vendor_id || '-'})`;
+                const dateLabel = line.booked_date || 'N/A';
+                const generatorLabel = hasKnownCapacity
+                    ? `${line.generator_id || '-'} (${capacity} kVA)`
+                    : `${line.generator_id || '-'} (Unknown capacity)`;
+                const priceLabel = hasKnownCapacity ? formatMoney(rateValue) : '-';
+                const lineAmountLabel = formatMoney(lineAmount);
+                const unknownHint = hasKnownCapacity
+                    ? ''
+                    : '<div class="mt-1 text-[11px] text-amber-700">Excluded from totals</div>';
+
+                tableRows.push(`
+                    <tr class="align-top">
+                        <td class="px-3 py-3">
+                            <div class="font-semibold text-slate-900">${escapeHtml(vendorLabel)}</div>
+                            <div class="mt-1 text-xs text-slate-400">${escapeHtml(line.booking_id || '-')}</div>
+                        </td>
+                        <td class="px-3 py-3">${escapeHtml(dateLabel)}</td>
+                        <td class="px-3 py-3">
+                            <div>${escapeHtml(generatorLabel)}</div>
+                            ${unknownHint}
+                        </td>
+                        <td class="px-3 py-3 text-right">${escapeHtml(priceLabel)}</td>
+                        <td class="px-3 py-3 text-right font-semibold text-slate-900">${escapeHtml(lineAmountLabel)}</td>
+                        <td class="px-3 py-3 text-right text-slate-300">-</td>
+                    </tr>
+                `);
+            });
+
+            grandTotal += vendorTotal;
+            tableRows.push(`
+                <tr class="bg-slate-50">
+                    <td colspan="5" class="px-3 py-3 text-right text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                        ${escapeHtml(group.vendor_name || '-')} (${escapeHtml(group.vendor_id || '-')}) Subtotal
+                    </td>
+                    <td class="px-3 py-3 text-right text-sm font-semibold text-slate-900">${escapeHtml(formatMoney(vendorTotal))}</td>
+                </tr>
+            `);
+        });
+
+        tableRows.push(`
+            <tr class="bg-slate-100">
+                <td colspan="5" class="px-3 py-3 text-right text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">
+                    Grand Total
+                </td>
+                <td class="px-3 py-3 text-right text-sm font-semibold text-slate-900">${escapeHtml(formatMoney(grandTotal))}</td>
+            </tr>
+        `);
+
+        tableBody.innerHTML = tableRows.join('');
+        table.classList.remove('hidden');
+        const rangeLabel = state.selectedFrom && state.selectedTo
+            ? `Range: ${state.selectedFrom} to ${state.selectedTo}`
+            : 'Range: -';
+        summaryEl.textContent = `${rangeLabel} | ${state.rows.length} line(s) across ${vendorGroups.length} vendor(s).`;
+        summaryEl.classList.remove('hidden');
+        setStateMessage('Billing lines loaded. Update rates to recalculate totals instantly.', 'success');
+    }
+
+    function validateDateRange() {
+        const fromDate = sanitizeDate(fromInput ? fromInput.value : '');
+        const toDate = sanitizeDate(toInput ? toInput.value : '');
+
+        if (!fromDate || !toDate) {
+            setFilterError('Date From and Date To are required.');
+            return null;
+        }
+        if (fromDate > toDate) {
+            setFilterError('Invalid date range: "Date From" cannot be later than "Date To".');
+            return null;
+        }
+
+        setFilterError('');
+        return { fromDate, toDate };
+    }
+
+    async function loadBillingLines() {
+        const validated = validateDateRange();
+        if (!validated) {
+            return;
+        }
+
+        const { fromDate, toDate } = validated;
+        setStateMessage('Loading billing lines...', 'info');
+        loadButton.disabled = true;
+
+        try {
+            const response = await fetch(
+                `/api/billing/lines?from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDate)}`
+            );
+
+            if (response.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+
+            let payload = {};
+            try {
+                payload = await response.json();
+            } catch (_error) {
+                payload = {};
+            }
+
+            if (!response.ok) {
+                const detail = payload.detail || 'Unable to load billing lines.';
+                setFilterError(detail);
+                table.classList.add('hidden');
+                summaryEl.classList.add('hidden');
+                tableBody.innerHTML = '';
+                setStateMessage(detail, 'error');
+                return;
+            }
+
+            state.rows = Array.isArray(payload.rows) ? payload.rows : [];
+            state.capacities = Array.isArray(payload.capacities)
+                ? payload.capacities.filter(value => Number.isFinite(Number(value))).map(value => Number(value))
+                : [];
+            state.selectedFrom = fromDate;
+            state.selectedTo = toDate;
+            syncRatesWithCapacities();
+            renderRateInputs();
+            renderTable();
+        } catch (_error) {
+            const message = 'Unable to load billing lines.';
+            setFilterError(message);
+            table.classList.add('hidden');
+            summaryEl.classList.add('hidden');
+            tableBody.innerHTML = '';
+            setStateMessage(message, 'error');
+        } finally {
+            loadButton.disabled = false;
+        }
+    }
+
+    loadButton?.addEventListener('click', loadBillingLines);
+    printButton?.addEventListener('click', () => {
+        if (!state.rows.length) {
+            setFilterError('Load billing data before printing.');
+            setStateMessage('No billing data available for print.', 'error');
+            return;
+        }
+        setFilterError('');
+        window.print();
+    });
+})();
+</script>
+{% endblock %}
