@@ -21,6 +21,7 @@
         #billingPrintOptions,
         #billingFilterError,
         #billingRatesSection,
+        #billingVendorSearchWrap,
         #billingStateMessage,
         #billingTable,
         #billingSummary {
@@ -200,6 +201,15 @@
             <div id="billingStateMessage" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 Select date range and load data.
             </div>
+            <div id="billingVendorSearchWrap" class="mt-4 hidden">
+                <label for="billingVendorSearch" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Search Vendor</label>
+                <input
+                    type="text"
+                    id="billingVendorSearch"
+                    placeholder="Type vendor name or vendor ID"
+                    class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                >
+            </div>
             <div id="billingSummary" class="mt-4 hidden text-sm text-slate-500"></div>
             <div id="billingPrintTopDate" class="mt-2">-</div>
             <div class="mt-4 overflow-x-auto">
@@ -234,6 +244,8 @@
     const ratesSection = document.getElementById('billingRatesSection');
     const rateInputsContainer = document.getElementById('billingRateInputs');
     const stateMessage = document.getElementById('billingStateMessage');
+    const vendorSearchWrap = document.getElementById('billingVendorSearchWrap');
+    const vendorSearchInput = document.getElementById('billingVendorSearch');
     const summaryEl = document.getElementById('billingSummary');
     const table = document.getElementById('billingTable');
     const tableBody = document.getElementById('billingTableBody');
@@ -250,6 +262,8 @@
         rows: [],
         capacities: [],
         ratesByCapacity: {},
+        paidByVendor: {},
+        vendorSearchQuery: '',
         selectedFrom: '',
         selectedTo: ''
     };
@@ -269,6 +283,31 @@
             return 0;
         }
         return num;
+    }
+
+    function sanitizePaid(value) {
+        return sanitizeRate(value);
+    }
+
+    function getRawPaidAmount(vendorKey) {
+        return sanitizePaid(state.paidByVendor[vendorKey]);
+    }
+
+    function getEffectivePaidAmount(rawPaid, subtotal) {
+        return Math.min(sanitizePaid(rawPaid), sanitizeRate(subtotal));
+    }
+
+    function buildVendorGroupKey(vendorName, vendorId) {
+        return `${String(vendorName || '')}__${String(vendorId || '')}`;
+    }
+
+    function normalizeSearchText(value) {
+        return String(value || '').trim().toLowerCase();
+    }
+
+    function rowMatchesVendorSearch(row, query) {
+        const searchable = `${String(row.vendor_name || '')} ${String(row.vendor_id || '')}`.toLowerCase();
+        return searchable.includes(query);
     }
 
     function formatMoney(value) {
@@ -392,9 +431,10 @@
         rows.forEach(row => {
             const vendorId = String(row.vendor_id || '');
             const vendorName = String(row.vendor_name || '');
-            const key = `${vendorName}__${vendorId}`;
+            const key = buildVendorGroupKey(vendorName, vendorId);
             if (!groupMap.has(key)) {
                 const group = {
+                    key,
                     vendor_id: vendorId,
                     vendor_name: vendorName,
                     rows: []
@@ -438,17 +478,21 @@
         return `${capacityExpr} = ${amountExpr} = ${formatCurrency(total)}`;
     }
 
-    function buildPrintModel(rows, ratesByCapacity) {
+    function buildPrintModel(rows, ratesByCapacity, paidByVendor) {
         const vendorGroups = [];
         const vendorMap = new Map();
 
         rows.forEach(row => {
-            const vendorId = String(row.vendor_id || '').trim();
-            const vendorName = String(row.vendor_name || '-').trim() || '-';
-            const vendorKey = `${vendorName}__${vendorId}`;
+            const rawVendorId = String(row.vendor_id || '');
+            const rawVendorName = String(row.vendor_name || '');
+            const vendorId = rawVendorId.trim();
+            const vendorName = rawVendorName.trim() || '-';
+            const vendorKey = buildVendorGroupKey(rawVendorName, rawVendorId);
             let vendor = vendorMap.get(vendorKey);
             if (!vendor) {
                 vendor = {
+                    vendor_id: vendorId,
+                    vendor_key: vendorKey,
                     vendor_name: vendorName,
                     dateMap: new Map()
                 };
@@ -500,11 +544,18 @@
                 };
             });
             const subtotal = dateLines.reduce((sum, line) => sum + line.total, 0);
+            const rawPaid = sanitizePaid(paidByVendor[vendor.vendor_key]);
+            const paidAmount = getEffectivePaidAmount(rawPaid, subtotal);
+            const netTotal = subtotal - paidAmount;
             grandTotal += subtotal;
             return {
+                vendor_id: vendor.vendor_id,
+                vendor_key: vendor.vendor_key,
                 vendor_name: vendor.vendor_name,
                 date_lines: dateLines,
-                subtotal
+                subtotal,
+                paid_amount: paidAmount,
+                net_total: netTotal
             };
         });
 
@@ -540,6 +591,14 @@
                                 <td class="print-date-col"></td>
                                 <td class="print-line-col">Subtotal = ${escapeHtml(formatCurrency(vendor.subtotal))}</td>
                             </tr>
+                            <tr>
+                                <td class="print-date-col"></td>
+                                <td class="print-line-col">Paid = - ${escapeHtml(formatCurrency(vendor.paid_amount))}</td>
+                            </tr>
+                            <tr class="print-subtotal-row">
+                                <td class="print-date-col"></td>
+                                <td class="print-line-col">Net = ${escapeHtml(formatCurrency(vendor.net_total))}</td>
+                            </tr>
                         </tbody>
                     </table>
                 </section>
@@ -548,7 +607,7 @@
 
         printSheet.innerHTML = vendorBlocks;
         printGrandTotal.textContent = includeGrandTotal
-            ? `Grand Total = ${formatCurrency(printModel.grand_total)}`
+            ? `Gross Grand Total = ${formatCurrency(printModel.grand_total)}`
             : '';
     }
 
@@ -556,6 +615,9 @@
         if (!table || !tableBody || !summaryEl) return;
 
         if (!state.rows.length) {
+            if (vendorSearchWrap) {
+                vendorSearchWrap.classList.add('hidden');
+            }
             table.classList.add('hidden');
             summaryEl.classList.add('hidden');
             setStateMessage('No confirmed bookings in selected range.', 'info');
@@ -563,12 +625,36 @@
             return;
         }
 
-        const vendorGroups = groupRowsByVendor(state.rows);
+        if (vendorSearchWrap) {
+            vendorSearchWrap.classList.remove('hidden');
+        }
+        if (vendorSearchInput && vendorSearchInput.value !== state.vendorSearchQuery) {
+            vendorSearchInput.value = state.vendorSearchQuery;
+        }
+
+        const searchQuery = normalizeSearchText(state.vendorSearchQuery);
+        const filteredRows = searchQuery
+            ? state.rows.filter(row => rowMatchesVendorSearch(row, searchQuery))
+            : state.rows;
+
+        if (!filteredRows.length) {
+            table.classList.add('hidden');
+            tableBody.innerHTML = '';
+            const rangeLabel = state.selectedFrom && state.selectedTo
+                ? `Range: ${state.selectedFrom} to ${state.selectedTo}`
+                : 'Range: -';
+            summaryEl.textContent = `${rangeLabel} | 0 line(s) across 0 vendor(s). Filter: "${state.vendorSearchQuery.trim()}".`;
+            summaryEl.classList.remove('hidden');
+            setStateMessage('No vendors match the current search.', 'info');
+            return;
+        }
+
+        const vendorGroups = groupRowsByVendor(filteredRows);
         let grandTotal = 0;
         const tableRows = [];
 
         vendorGroups.forEach(group => {
-            let vendorTotal = 0;
+            let vendorSubtotal = 0;
 
             group.rows.forEach(line => {
                 const capacity = getCapacityValue(line);
@@ -576,7 +662,7 @@
                 const rateValue = hasKnownCapacity ? getRateForCapacity(capacity) : 0;
                 const lineAmount = hasKnownCapacity ? rateValue : 0;
                 if (hasKnownCapacity) {
-                    vendorTotal += lineAmount;
+                    vendorSubtotal += lineAmount;
                 }
 
                 const vendorLabel = `${line.vendor_name || '-'} (${line.vendor_id || '-'})`;
@@ -608,13 +694,36 @@
                 `);
             });
 
-            grandTotal += vendorTotal;
+            const rawPaid = getRawPaidAmount(group.key);
+            const effectivePaid = getEffectivePaidAmount(rawPaid, vendorSubtotal);
+            const vendorNet = vendorSubtotal - effectivePaid;
+            grandTotal += vendorSubtotal;
             tableRows.push(`
                 <tr class="bg-slate-50">
-                    <td colspan="5" class="px-3 py-3 text-right text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-                        ${escapeHtml(group.vendor_name || '-')} (${escapeHtml(group.vendor_id || '-')}) Subtotal
+                    <td colspan="5" class="px-3 py-3 text-right">
+                        <div class="flex flex-wrap items-center justify-end gap-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                                ${escapeHtml(group.vendor_name || '-')} (${escapeHtml(group.vendor_id || '-')}) Subtotal
+                            </div>
+                            <label class="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                <span>Paid</span>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    inputmode="decimal"
+                                    data-vendor-paid="${escapeHtml(group.key)}"
+                                    data-vendor-subtotal="${escapeHtml(vendorSubtotal)}"
+                                    value="${escapeHtml(rawPaid)}"
+                                    class="w-28 rounded-lg border border-slate-200 bg-white px-2 py-1 text-right text-sm font-medium text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                                >
+                            </label>
+                            <div data-role="vendor-discount" class="text-xs font-semibold uppercase tracking-[0.12em] text-rose-600">
+                                - ${escapeHtml(formatCurrency(effectivePaid))}
+                            </div>
+                        </div>
                     </td>
-                    <td class="px-3 py-3 text-right text-sm font-semibold text-slate-900">${escapeHtml(formatCurrency(vendorTotal))}</td>
+                    <td data-role="vendor-net" class="px-3 py-3 text-right text-sm font-semibold text-slate-900">${escapeHtml(formatCurrency(vendorNet))}</td>
                 </tr>
             `);
         });
@@ -622,18 +731,53 @@
         tableRows.push(`
             <tr class="bg-slate-100">
                 <td colspan="5" class="px-3 py-3 text-right text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">
-                    Grand Total
+                    Gross Grand Total
                 </td>
                 <td class="px-3 py-3 text-right text-sm font-semibold text-slate-900">${escapeHtml(formatCurrency(grandTotal))}</td>
             </tr>
         `);
 
         tableBody.innerHTML = tableRows.join('');
+        tableBody.querySelectorAll('input[data-vendor-paid]').forEach(input => {
+            const vendorKey = input.getAttribute('data-vendor-paid') || '';
+            const vendorSubtotal = sanitizeRate(input.getAttribute('data-vendor-subtotal'));
+            const subtotalRow = input.closest('tr');
+            const discountEl = subtotalRow ? subtotalRow.querySelector('[data-role="vendor-discount"]') : null;
+            const netEl = subtotalRow ? subtotalRow.querySelector('[data-role="vendor-net"]') : null;
+
+            const syncVendorPaidPreview = () => {
+                const rawPaid = sanitizePaid(input.value);
+                const effectivePaid = getEffectivePaidAmount(rawPaid, vendorSubtotal);
+                const vendorNet = vendorSubtotal - effectivePaid;
+
+                state.paidByVendor[vendorKey] = rawPaid;
+                if (discountEl) {
+                    discountEl.textContent = `- ${formatCurrency(effectivePaid)}`;
+                }
+                if (netEl) {
+                    netEl.textContent = formatCurrency(vendorNet);
+                }
+            };
+
+            input.addEventListener('input', () => {
+                syncVendorPaidPreview();
+            });
+            input.addEventListener('change', () => {
+                syncVendorPaidPreview();
+            });
+            input.addEventListener('blur', () => {
+                const vendorKey = input.getAttribute('data-vendor-paid') || '';
+                state.paidByVendor[vendorKey] = sanitizePaid(input.value);
+            });
+        });
         table.classList.remove('hidden');
         const rangeLabel = state.selectedFrom && state.selectedTo
             ? `Range: ${state.selectedFrom} to ${state.selectedTo}`
             : 'Range: -';
-        summaryEl.textContent = `${rangeLabel} | ${state.rows.length} line(s) across ${vendorGroups.length} vendor(s).`;
+        const baseSummary = `${rangeLabel} | ${filteredRows.length} line(s) across ${vendorGroups.length} vendor(s).`;
+        summaryEl.textContent = searchQuery
+            ? `${baseSummary} Filter: "${state.vendorSearchQuery.trim()}".`
+            : baseSummary;
         summaryEl.classList.remove('hidden');
         setStateMessage('Billing lines loaded. Update rates to recalculate totals instantly.', 'success');
     }
@@ -696,6 +840,7 @@
             state.capacities = Array.isArray(payload.capacities)
                 ? payload.capacities.filter(value => Number.isFinite(Number(value))).map(value => Number(value))
                 : [];
+            state.paidByVendor = {};
             state.selectedFrom = fromDate;
             state.selectedTo = toDate;
             syncRatesWithCapacities();
@@ -714,6 +859,10 @@
     }
 
     loadButton?.addEventListener('click', loadBillingLines);
+    vendorSearchInput?.addEventListener('input', () => {
+        state.vendorSearchQuery = vendorSearchInput.value || '';
+        renderTable();
+    });
     printButton?.addEventListener('click', () => {
         if (!state.rows.length) {
             setFilterError('Load billing data before printing.');
@@ -721,7 +870,7 @@
             return;
         }
         const includeGrandTotal = includeGrandTotalToggle ? includeGrandTotalToggle.checked : true;
-        const printModel = buildPrintModel(state.rows, state.ratesByCapacity);
+        const printModel = buildPrintModel(state.rows, state.ratesByCapacity, state.paidByVendor);
         renderPrintSheet(printModel, includeGrandTotal);
         if (printTopDate) {
             const hasFrom = Boolean(state.selectedFrom);
