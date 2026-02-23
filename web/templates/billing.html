@@ -2,17 +2,28 @@
 
 {% block head %}
 <style>
+    #billingPrintTopDate,
+    #billingPrintSheet,
+    #billingPrintGrandTotal {
+        display: none;
+    }
+
     @media print {
         @page {
-            margin: 12mm;
+            size: A4 portrait;
+            margin: 8mm;
         }
         nav,
         footer,
+        #billingPageHeading,
+        #billingFiltersSection,
         #loadBillingData,
-        #billingPrintButton,
+        #billingPrintOptions,
         #billingFilterError,
         #billingRatesSection,
-        #billingStateMessage {
+        #billingStateMessage,
+        #billingTable,
+        #billingSummary {
             display: none !important;
         }
         body,
@@ -20,21 +31,102 @@
             background: #ffffff !important;
             min-height: auto !important;
         }
-        .overflow-x-auto {
-            overflow: visible !important;
+        .rounded-2xl,
+        .rounded-xl {
+            border-radius: 0 !important;
         }
-        #billingTable {
-            display: table !important;
-            width: 100% !important;
-            font-size: 12px !important;
+        .shadow-sm {
+            box-shadow: none !important;
         }
-        #billingTable th,
-        #billingTable td {
-            padding: 6px !important;
+        .border {
+            border-color: #d4d4d4 !important;
         }
-        #billingSummary {
+        #billingPrintTopDate,
+        #billingPrintSheet,
+        #billingPrintGrandTotal {
             display: block !important;
-            margin-bottom: 8px !important;
+        }
+        .mx-auto.max-w-6xl {
+            max-width: 100% !important;
+            padding: 0 !important;
+        }
+        #billingPrintArea {
+            margin: 0 !important;
+            padding: 0 !important;
+            border: 0 !important;
+            background: transparent !important;
+            box-shadow: none !important;
+        }
+        #billingPrintTopDate {
+            margin: 0 0 3mm 0 !important;
+            text-align: center !important;
+            font-size: 11px !important;
+            font-weight: 700 !important;
+            color: #111827 !important;
+            line-height: 1.15 !important;
+        }
+        #billingPrintSheet {
+            display: grid !important;
+            grid-template-columns: 1fr 1fr !important;
+            column-gap: 8mm !important;
+            row-gap: 3mm !important;
+            font-size: 11px !important;
+            color: #111827 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        .print-vendor-block {
+            margin: 0 !important;
+            page-break-inside: avoid;
+            break-inside: avoid;
+            border: 1px dotted #9ca3af !important;
+            padding: 1.5mm !important;
+            box-sizing: border-box !important;
+        }
+        .print-vendor-name {
+            font-size: 12px !important;
+            font-weight: 700 !important;
+            margin: 0 0 1mm 0 !important;
+            line-height: 1.1 !important;
+        }
+        .print-vendor-lines {
+            width: 100% !important;
+            border-collapse: collapse !important;
+        }
+        .print-vendor-lines td {
+            padding: 0 !important;
+            vertical-align: top !important;
+            border: 0 !important;
+            font-size: 11px !important;
+            line-height: 1.18 !important;
+        }
+        .print-date-col {
+            width: 84px !important;
+            min-width: 84px !important;
+            padding-right: 2mm !important;
+            white-space: nowrap !important;
+            color: #111827 !important;
+        }
+        .print-line-col {
+            color: #111827 !important;
+            word-break: break-word !important;
+            overflow-wrap: anywhere !important;
+        }
+        .print-subtotal-row td {
+            padding-top: 1mm !important;
+            font-weight: 700 !important;
+        }
+        #billingPrintGrandTotal {
+            margin-top: 3mm !important;
+            padding-top: 2mm !important;
+            border-top: 1px solid #d4d4d4 !important;
+            font-size: 12px !important;
+            font-weight: 700 !important;
+            text-align: right !important;
+            line-height: 1.2 !important;
+        }
+        #billingPrintSheet .text-amber-700 {
+            color: #92400e !important;
         }
     }
 </style>
@@ -43,7 +135,7 @@
 {% block content %}
 <div class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100">
     <div class="mx-auto max-w-6xl px-4 py-10 lg:py-12" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
-        <div class="flex flex-wrap items-center justify-between gap-4">
+        <div id="billingPageHeading" class="flex flex-wrap items-center justify-between gap-4">
             <div>
                 <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Billing</div>
                 <h1 class="mt-2 text-2xl font-semibold text-slate-900">Billing Preview</h1>
@@ -51,7 +143,7 @@
             </div>
         </div>
 
-        <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div id="billingFiltersSection" class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div class="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] sm:items-end">
                 <div>
                     <label for="billingDateFrom" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Date From</label>
@@ -76,13 +168,24 @@
                 >
                     Load
                 </button>
-                <button
-                    id="billingPrintButton"
-                    type="button"
-                    class="rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-                >
-                    Print
-                </button>
+                <div id="billingPrintOptions" class="flex flex-col gap-2 sm:items-end">
+                    <button
+                        id="billingPrintButton"
+                        type="button"
+                        class="rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+                    >
+                        Print
+                    </button>
+                    <label for="billingIncludeGrandTotal" class="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        <input
+                            id="billingIncludeGrandTotal"
+                            type="checkbox"
+                            checked
+                            class="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-300"
+                        >
+                        Include Grand Total
+                    </label>
+                </div>
             </div>
             <div id="billingFilterError" class="mt-3 hidden rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"></div>
         </div>
@@ -93,11 +196,12 @@
             <div id="billingRateInputs" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"></div>
         </div>
 
-        <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div id="billingPrintArea" class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div id="billingStateMessage" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 Select date range and load data.
             </div>
             <div id="billingSummary" class="mt-4 hidden text-sm text-slate-500"></div>
+            <div id="billingPrintTopDate" class="mt-2">-</div>
             <div class="mt-4 overflow-x-auto">
                 <table id="billingTable" class="hidden min-w-full text-sm">
                     <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
@@ -113,6 +217,8 @@
                     <tbody id="billingTableBody" class="divide-y divide-slate-100 text-slate-700"></tbody>
                 </table>
             </div>
+            <div id="billingPrintSheet" class="mt-4"></div>
+            <div id="billingPrintGrandTotal" class="mt-3"></div>
         </div>
     </div>
 </div>
@@ -123,6 +229,7 @@
     const toInput = document.getElementById('billingDateTo');
     const loadButton = document.getElementById('loadBillingData');
     const printButton = document.getElementById('billingPrintButton');
+    const includeGrandTotalToggle = document.getElementById('billingIncludeGrandTotal');
     const filterError = document.getElementById('billingFilterError');
     const ratesSection = document.getElementById('billingRatesSection');
     const rateInputsContainer = document.getElementById('billingRateInputs');
@@ -130,6 +237,9 @@
     const summaryEl = document.getElementById('billingSummary');
     const table = document.getElementById('billingTable');
     const tableBody = document.getElementById('billingTableBody');
+    const printTopDate = document.getElementById('billingPrintTopDate');
+    const printSheet = document.getElementById('billingPrintSheet');
+    const printGrandTotal = document.getElementById('billingPrintGrandTotal');
 
     const moneyFormatter = new Intl.NumberFormat('en-IN', {
         minimumFractionDigits: 2,
@@ -163,6 +273,10 @@
 
     function formatMoney(value) {
         return moneyFormatter.format(sanitizeRate(value));
+    }
+
+    function formatCurrency(value) {
+        return `₹ ${formatMoney(value)}`;
     }
 
     function escapeHtml(value) {
@@ -294,6 +408,150 @@
         return orderedGroups;
     }
 
+    function sortDateKeys(dateKeys) {
+        return dateKeys.slice().sort((a, b) => {
+            const aDate = sanitizeDate(a);
+            const bDate = sanitizeDate(b);
+            if (!aDate && !bDate) return String(a).localeCompare(String(b));
+            if (!aDate) return 1;
+            if (!bDate) return -1;
+            return aDate.localeCompare(bDate);
+        });
+    }
+
+    function buildPrintFormula(entries, total) {
+        if (!entries.length) {
+            return `- = ${formatCurrency(0)}`;
+        }
+
+        const capacityExpr = entries.map(entry => entry.capacityLabel).join(' + ');
+        const amountExpr = entries.map(entry => {
+            if (entry.excluded) {
+                return `${formatCurrency(entry.amount)} (excluded)`;
+            }
+            return formatCurrency(entry.amount);
+        }).join(' + ');
+
+        if (entries.length === 1) {
+            return `${capacityExpr} = ${amountExpr}`;
+        }
+        return `${capacityExpr} = ${amountExpr} = ${formatCurrency(total)}`;
+    }
+
+    function buildPrintModel(rows, ratesByCapacity) {
+        const vendorGroups = [];
+        const vendorMap = new Map();
+
+        rows.forEach(row => {
+            const vendorId = String(row.vendor_id || '').trim();
+            const vendorName = String(row.vendor_name || '-').trim() || '-';
+            const vendorKey = `${vendorName}__${vendorId}`;
+            let vendor = vendorMap.get(vendorKey);
+            if (!vendor) {
+                vendor = {
+                    vendor_name: vendorName,
+                    dateMap: new Map()
+                };
+                vendorMap.set(vendorKey, vendor);
+                vendorGroups.push(vendor);
+            }
+
+            const rawDate = String(row.booked_date || '').trim();
+            const dateKey = sanitizeDate(rawDate) || 'N/A';
+            let dateGroup = vendor.dateMap.get(dateKey);
+            if (!dateGroup) {
+                dateGroup = {
+                    date: dateKey,
+                    entries: [],
+                    total: 0
+                };
+                vendor.dateMap.set(dateKey, dateGroup);
+            }
+
+            const capacity = getCapacityValue(row);
+            if (capacity === null) {
+                dateGroup.entries.push({
+                    capacityLabel: 'Unknown',
+                    amount: 0,
+                    excluded: true
+                });
+                return;
+            }
+
+            const amount = sanitizeRate(ratesByCapacity[String(capacity)]);
+            dateGroup.entries.push({
+                capacityLabel: `${capacity} kVA`,
+                amount,
+                excluded: false
+            });
+            dateGroup.total += amount;
+        });
+
+        let grandTotal = 0;
+        const vendors = vendorGroups.map(vendor => {
+            const sortedDates = sortDateKeys(Array.from(vendor.dateMap.keys()));
+            const dateLines = sortedDates.map(dateKey => {
+                const dateGroup = vendor.dateMap.get(dateKey);
+                const lineTotal = dateGroup ? dateGroup.total : 0;
+                return {
+                    date: dateKey,
+                    formula: buildPrintFormula(dateGroup ? dateGroup.entries : [], lineTotal),
+                    total: lineTotal
+                };
+            });
+            const subtotal = dateLines.reduce((sum, line) => sum + line.total, 0);
+            grandTotal += subtotal;
+            return {
+                vendor_name: vendor.vendor_name,
+                date_lines: dateLines,
+                subtotal
+            };
+        });
+
+        return {
+            vendors,
+            grand_total: grandTotal
+        };
+    }
+
+    function renderPrintSheet(printModel, includeGrandTotal) {
+        if (!printSheet || !printGrandTotal) return;
+        if (!printModel.vendors.length) {
+            printSheet.innerHTML = '<div>No billing data available.</div>';
+            printGrandTotal.textContent = '';
+            return;
+        }
+
+        const vendorBlocks = printModel.vendors.map(vendor => {
+            const lineRows = vendor.date_lines.map(line => `
+                <tr>
+                    <td class="print-date-col">${escapeHtml(line.date)}</td>
+                    <td class="print-line-col">${escapeHtml(line.formula)}</td>
+                </tr>
+            `).join('');
+
+            return `
+                <section class="print-vendor-block">
+                    <h3 class="print-vendor-name">${escapeHtml(vendor.vendor_name)}</h3>
+                    <table class="print-vendor-lines">
+                        <tbody>
+                            ${lineRows}
+                            <tr class="print-subtotal-row">
+                                <td class="print-date-col"></td>
+                                <td class="print-line-col">Subtotal = ${escapeHtml(formatCurrency(vendor.subtotal))}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </section>
+            `;
+        }).join('');
+
+        printSheet.innerHTML = vendorBlocks;
+        printGrandTotal.textContent = includeGrandTotal
+            ? `Grand Total = ${formatCurrency(printModel.grand_total)}`
+            : '';
+    }
+
     function renderTable() {
         if (!table || !tableBody || !summaryEl) return;
 
@@ -326,8 +584,8 @@
                 const generatorLabel = hasKnownCapacity
                     ? `${line.generator_id || '-'} (${capacity} kVA)`
                     : `${line.generator_id || '-'} (Unknown capacity)`;
-                const priceLabel = hasKnownCapacity ? formatMoney(rateValue) : '-';
-                const lineAmountLabel = formatMoney(lineAmount);
+                const priceLabel = hasKnownCapacity ? formatCurrency(rateValue) : '-';
+                const lineAmountLabel = formatCurrency(lineAmount);
                 const unknownHint = hasKnownCapacity
                     ? ''
                     : '<div class="mt-1 text-[11px] text-amber-700">Excluded from totals</div>';
@@ -356,7 +614,7 @@
                     <td colspan="5" class="px-3 py-3 text-right text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
                         ${escapeHtml(group.vendor_name || '-')} (${escapeHtml(group.vendor_id || '-')}) Subtotal
                     </td>
-                    <td class="px-3 py-3 text-right text-sm font-semibold text-slate-900">${escapeHtml(formatMoney(vendorTotal))}</td>
+                    <td class="px-3 py-3 text-right text-sm font-semibold text-slate-900">${escapeHtml(formatCurrency(vendorTotal))}</td>
                 </tr>
             `);
         });
@@ -366,7 +624,7 @@
                 <td colspan="5" class="px-3 py-3 text-right text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">
                     Grand Total
                 </td>
-                <td class="px-3 py-3 text-right text-sm font-semibold text-slate-900">${escapeHtml(formatMoney(grandTotal))}</td>
+                <td class="px-3 py-3 text-right text-sm font-semibold text-slate-900">${escapeHtml(formatCurrency(grandTotal))}</td>
             </tr>
         `);
 
@@ -461,6 +719,20 @@
             setFilterError('Load billing data before printing.');
             setStateMessage('No billing data available for print.', 'error');
             return;
+        }
+        const includeGrandTotal = includeGrandTotalToggle ? includeGrandTotalToggle.checked : true;
+        const printModel = buildPrintModel(state.rows, state.ratesByCapacity);
+        renderPrintSheet(printModel, includeGrandTotal);
+        if (printTopDate) {
+            const hasFrom = Boolean(state.selectedFrom);
+            const hasTo = Boolean(state.selectedTo);
+            if (hasFrom && hasTo) {
+                printTopDate.textContent = state.selectedFrom === state.selectedTo
+                    ? state.selectedFrom
+                    : `${state.selectedFrom} to ${state.selectedTo}`;
+            } else {
+                printTopDate.textContent = '-';
+            }
         }
         setFilterError('');
         window.print();
