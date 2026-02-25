@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
     @keyframes fadeUp {
         0% {
@@ -29,11 +30,11 @@
                             <div data-settings-subtitle class="mt-1 text-xs text-slate-500">Manage access and roles</div>
                         </div>
                     </button>
-                    <button type="button" data-settings-target="server-health" class="settings-nav-item group flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 text-left text-slate-900 transition">
+                    <button type="button" data-settings-target="monitor" class="settings-nav-item group flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 text-left text-slate-900 transition">
                         <span data-settings-icon class="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-sm font-semibold text-slate-700 transition group-hover:bg-slate-200">S</span>
                         <div>
-                            <div class="text-sm font-semibold">Server Health</div>
-                            <div data-settings-subtitle class="mt-1 text-xs text-slate-500">Live endpoint status</div>
+                            <div class="text-sm font-semibold">Monitor</div>
+                            <div data-settings-subtitle class="mt-1 text-xs text-slate-500">Live server metrics</div>
                         </div>
                     </button>
                     <button type="button" data-settings-target="integration" class="settings-nav-item group flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 text-left text-slate-900 transition">
@@ -141,20 +142,20 @@
 
                 </section>
 
-                <section data-settings-section="server-health" class="hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <section data-settings-section="monitor" class="hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div class="flex flex-wrap items-center justify-between gap-3">
                         <div>
-                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Server Health</div>
-                            <h2 class="mt-2 text-2xl font-semibold text-slate-900">Live System Status</h2>
-                            <p class="mt-1 text-sm text-slate-500">Real-time health from `/health` and `/api/info`.</p>
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Monitor</div>
+                            <h2 class="mt-2 text-2xl font-semibold text-slate-900">Live Server Metrics</h2>
+                            <p class="mt-1 text-sm text-slate-500">Live CPU, memory, and temperature with real-time charts.</p>
                         </div>
                         <button id="refreshServerHealth" type="button" class="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900">
-                            Refresh
+                            Refresh Monitor
                         </button>
                     </div>
 
                     <div id="serverHealthLoading" class="mt-4 hidden rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                        Loading server health...
+                        Loading monitor data...
                     </div>
 
                     <div id="serverHealthError" class="mt-4 hidden rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"></div>
@@ -180,6 +181,58 @@
                         <article class="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2 lg:col-span-1">
                             <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Database Path</div>
                             <div id="healthDatabase" class="mt-3 break-all text-sm text-slate-700">-</div>
+                        </article>
+                    </div>
+
+                    <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        <article class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                            <div class="flex items-center justify-between gap-2">
+                                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">CPU Usage</div>
+                                <span id="monitorCpuBadge" class="inline-flex rounded-full bg-slate-200 px-2 py-1 text-xs font-semibold text-slate-700">unknown</span>
+                            </div>
+                            <div id="monitorCpuValue" class="mt-3 text-2xl font-semibold text-slate-900">-</div>
+                            <div class="mt-2 text-xs text-slate-500">System-wide CPU utilization.</div>
+                        </article>
+
+                        <article class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                            <div class="flex items-center justify-between gap-2">
+                                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Memory Usage</div>
+                                <span id="monitorMemoryBadge" class="inline-flex rounded-full bg-slate-200 px-2 py-1 text-xs font-semibold text-slate-700">unknown</span>
+                            </div>
+                            <div id="monitorMemoryValue" class="mt-3 text-2xl font-semibold text-slate-900">-</div>
+                            <div id="monitorMemoryMeta" class="mt-2 text-xs text-slate-500">Used - / Total -</div>
+                        </article>
+
+                        <article class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                            <div class="flex items-center justify-between gap-2">
+                                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Temperature</div>
+                                <span id="monitorTempBadge" class="inline-flex rounded-full bg-slate-200 px-2 py-1 text-xs font-semibold text-slate-700">unknown</span>
+                            </div>
+                            <div id="monitorTempValue" class="mt-3 text-2xl font-semibold text-slate-900">N/A</div>
+                            <div id="monitorTempMeta" class="mt-2 text-xs text-slate-500">Sensor unavailable.</div>
+                        </article>
+                    </div>
+
+                    <div class="mt-6 grid gap-4 lg:grid-cols-3">
+                        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">CPU Trend</div>
+                            <div class="mt-3 h-56">
+                                <canvas id="monitorCpuChart" aria-label="CPU trend chart"></canvas>
+                            </div>
+                        </article>
+
+                        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Memory Trend</div>
+                            <div class="mt-3 h-56">
+                                <canvas id="monitorMemoryChart" aria-label="Memory trend chart"></canvas>
+                            </div>
+                        </article>
+
+                        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Temperature Trend</div>
+                            <div class="mt-3 h-56">
+                                <canvas id="monitorTempChart" aria-label="Temperature trend chart"></canvas>
+                            </div>
                         </article>
                     </div>
                 </section>
@@ -314,6 +367,14 @@
         const healthTitle = document.getElementById('healthTitle');
         const healthVersion = document.getElementById('healthVersion');
         const healthDatabase = document.getElementById('healthDatabase');
+        const monitorCpuValue = document.getElementById('monitorCpuValue');
+        const monitorCpuBadge = document.getElementById('monitorCpuBadge');
+        const monitorMemoryValue = document.getElementById('monitorMemoryValue');
+        const monitorMemoryMeta = document.getElementById('monitorMemoryMeta');
+        const monitorMemoryBadge = document.getElementById('monitorMemoryBadge');
+        const monitorTempValue = document.getElementById('monitorTempValue');
+        const monitorTempMeta = document.getElementById('monitorTempMeta');
+        const monitorTempBadge = document.getElementById('monitorTempBadge');
         const openCreateUserModalButton = document.getElementById('openCreateUserModal');
         const createUserModal = document.getElementById('createUserModal');
         const closeCreateUserModalButton = document.getElementById('closeCreateUserModal');
@@ -342,9 +403,24 @@
         const inactiveSubtitleClasses = ['text-slate-500'];
         const badgeHealthyClasses = ['bg-emerald-100', 'text-emerald-700'];
         const badgeUnhealthyClasses = ['bg-rose-100', 'text-rose-700'];
+        const badgeWarningClasses = ['bg-amber-100', 'text-amber-700'];
         const badgeUnknownClasses = ['bg-slate-200', 'text-slate-700'];
+        const monitorBadgeClasses = [
+            ...badgeHealthyClasses,
+            ...badgeWarningClasses,
+            ...badgeUnhealthyClasses,
+            ...badgeUnknownClasses
+        ];
+        const monitorPollIntervalMs = 2000;
+        const monitorMaxPoints = 300;
         let hasLoadedHealth = false;
         let isLoadingHealth = false;
+        let isLoadingMonitor = false;
+        let monitorPollTimer = null;
+        let monitorChartsReady = false;
+        let monitorCpuChart = null;
+        let monitorMemoryChart = null;
+        let monitorTempChart = null;
 
         function clearPasswordMatchError() {
             if (editUserConfirmPassword) {
@@ -481,8 +557,15 @@
                 node.classList.toggle('hidden', sectionName !== target);
             });
 
-            if (target === 'server-health' && !hasLoadedHealth) {
-                loadServerHealth();
+            if (target === 'monitor') {
+                if (!hasLoadedHealth) {
+                    loadServerHealth();
+                }
+                ensureMonitorCharts();
+                loadMonitorSnapshot();
+                startMonitorPolling();
+            } else {
+                stopMonitorPolling();
             }
         }
 
@@ -514,6 +597,262 @@
         function updateCheckedAt() {
             if (!healthCheckedAt) return;
             healthCheckedAt.textContent = new Date().toLocaleString();
+        }
+
+        function isMonitorSectionVisible() {
+            const monitorSection = sectionMap.get('monitor');
+            return Boolean(monitorSection && !monitorSection.classList.contains('hidden'));
+        }
+
+        function formatPercent(value) {
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed)) return '-';
+            return `${parsed.toFixed(1)}%`;
+        }
+
+        function formatMegabytes(value) {
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed)) return '-';
+            return `${parsed.toLocaleString(undefined, {
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1
+            })} MB`;
+        }
+
+        function toTimeLabel(timestamp) {
+            const dt = timestamp ? new Date(timestamp) : new Date();
+            if (Number.isNaN(dt.getTime())) {
+                return new Date().toLocaleTimeString('en-US', { hour12: false });
+            }
+            return dt.toLocaleTimeString('en-US', { hour12: false });
+        }
+
+        function applyMonitorBadge(element, status) {
+            if (!element) return;
+            element.classList.remove(...monitorBadgeClasses);
+            const normalized = String(status || 'unknown').toLowerCase();
+            if (normalized === 'critical') {
+                element.classList.add(...badgeUnhealthyClasses);
+            } else if (normalized === 'high') {
+                element.classList.add(...badgeWarningClasses);
+            } else if (normalized === 'normal') {
+                element.classList.add(...badgeHealthyClasses);
+            } else {
+                element.classList.add(...badgeUnknownClasses);
+            }
+            element.textContent = normalized;
+        }
+
+        function createMonitorChart(canvasId, datasetLabel, color, minY, maxY) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas || typeof Chart === 'undefined') return null;
+            const context = canvas.getContext('2d');
+            if (!context) return null;
+
+            return new Chart(context, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: datasetLabel,
+                            data: [],
+                            borderColor: color,
+                            backgroundColor: 'transparent',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            tension: 0.25,
+                            spanGaps: false,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxTicksLimit: 6
+                            },
+                            grid: {
+                                color: '#e2e8f0'
+                            }
+                        },
+                        y: {
+                            min: minY,
+                            max: maxY,
+                            grid: {
+                                color: '#e2e8f0'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function ensureMonitorCharts() {
+            if (monitorChartsReady) return;
+            if (typeof Chart === 'undefined') {
+                renderHealthError('Chart library failed to load for monitor graphs.');
+                return;
+            }
+
+            monitorCpuChart = createMonitorChart('monitorCpuChart', 'CPU %', '#0f172a', 0, 100);
+            monitorMemoryChart = createMonitorChart('monitorMemoryChart', 'Memory %', '#0284c7', 0, 100);
+            monitorTempChart = createMonitorChart('monitorTempChart', 'Temperature (C)', '#dc2626', 0, 100);
+            monitorChartsReady = Boolean(monitorCpuChart && monitorMemoryChart && monitorTempChart);
+        }
+
+        function appendChartPoint(chart, label, value) {
+            if (!chart) return;
+            chart.data.labels.push(label);
+            chart.data.datasets[0].data.push(value);
+            if (chart.data.labels.length > monitorMaxPoints) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+        }
+
+        function updateTemperatureAxis() {
+            if (!monitorTempChart) return;
+            const series = monitorTempChart.data.datasets[0].data.filter((value) => Number.isFinite(value));
+            if (!series.length) {
+                monitorTempChart.options.scales.y.min = 0;
+                monitorTempChart.options.scales.y.max = 100;
+                return;
+            }
+
+            const minValue = Math.min(...series);
+            const maxValue = Math.max(...series);
+            const paddedMin = Math.max(0, Math.floor((minValue - 5) / 5) * 5);
+            const paddedMax = Math.ceil((maxValue + 5) / 5) * 5;
+            monitorTempChart.options.scales.y.min = paddedMin;
+            monitorTempChart.options.scales.y.max = Math.max(paddedMin + 10, paddedMax);
+        }
+
+        function updateMonitorCharts(metrics) {
+            ensureMonitorCharts();
+            if (!monitorChartsReady) return;
+
+            const label = toTimeLabel(metrics.timestamp);
+            const cpuPercent = Number(metrics?.cpu?.percent);
+            const memoryPercent = Number(metrics?.memory?.percent);
+            const tempPayload = metrics?.temperature || {};
+            const tempValue = tempPayload.available ? Number(tempPayload.celsius) : null;
+
+            appendChartPoint(monitorCpuChart, label, Number.isFinite(cpuPercent) ? cpuPercent : null);
+            appendChartPoint(monitorMemoryChart, label, Number.isFinite(memoryPercent) ? memoryPercent : null);
+            appendChartPoint(monitorTempChart, label, Number.isFinite(tempValue) ? tempValue : null);
+
+            updateTemperatureAxis();
+            monitorCpuChart.update('none');
+            monitorMemoryChart.update('none');
+            monitorTempChart.update('none');
+        }
+
+        function updateMonitorCards(metrics) {
+            const cpu = metrics?.cpu || {};
+            const memory = metrics?.memory || {};
+            const temperature = metrics?.temperature || {};
+
+            if (monitorCpuValue) {
+                monitorCpuValue.textContent = formatPercent(cpu.percent);
+            }
+            applyMonitorBadge(monitorCpuBadge, cpu.status || 'unknown');
+
+            if (monitorMemoryValue) {
+                monitorMemoryValue.textContent = formatPercent(memory.percent);
+            }
+            if (monitorMemoryMeta) {
+                monitorMemoryMeta.textContent = `Used ${formatMegabytes(memory.used_mb)} / Total ${formatMegabytes(memory.total_mb)}`;
+            }
+            applyMonitorBadge(monitorMemoryBadge, memory.status || 'unknown');
+
+            if (temperature.available && Number.isFinite(Number(temperature.celsius))) {
+                if (monitorTempValue) {
+                    monitorTempValue.textContent = `${Number(temperature.celsius).toFixed(1)}°C`;
+                }
+                if (monitorTempMeta) {
+                    monitorTempMeta.textContent = temperature.sensor
+                        ? `Sensor: ${temperature.sensor}`
+                        : 'Sensor reading available.';
+                }
+                applyMonitorBadge(monitorTempBadge, temperature.status || 'normal');
+            } else {
+                if (monitorTempValue) {
+                    monitorTempValue.textContent = 'N/A';
+                }
+                if (monitorTempMeta) {
+                    monitorTempMeta.textContent = temperature.note || 'Temperature sensor not available on this host';
+                }
+                applyMonitorBadge(monitorTempBadge, 'unknown');
+            }
+        }
+
+        async function loadMonitorSnapshot(options = {}) {
+            const { silent = false } = options;
+            if (isLoadingMonitor) return;
+            if (document.hidden) return;
+            if (!isMonitorSectionVisible()) return;
+
+            isLoadingMonitor = true;
+            if (!silent) {
+                clearHealthError();
+            }
+
+            try {
+                const response = await fetch('/api/monitor/live');
+                if (response.status === 401) {
+                    window.location.href = '/login';
+                    return;
+                }
+
+                let monitorData = {};
+                try {
+                    monitorData = await response.json();
+                } catch (_error) {
+                    monitorData = {};
+                }
+
+                if (!response.ok) {
+                    throw new Error(monitorData.detail || 'Unable to load monitor metrics.');
+                }
+
+                updateMonitorCards(monitorData);
+                updateMonitorCharts(monitorData);
+            } catch (error) {
+                if (!silent) {
+                    renderHealthError('Unable to load monitor metrics right now. Please try again.');
+                }
+            } finally {
+                isLoadingMonitor = false;
+            }
+        }
+
+        function startMonitorPolling() {
+            if (monitorPollTimer) return;
+            if (document.hidden || !isMonitorSectionVisible()) return;
+            monitorPollTimer = window.setInterval(() => {
+                if (document.hidden || !isMonitorSectionVisible()) return;
+                loadMonitorSnapshot({ silent: true });
+            }, monitorPollIntervalMs);
+        }
+
+        function stopMonitorPolling() {
+            if (!monitorPollTimer) return;
+            window.clearInterval(monitorPollTimer);
+            monitorPollTimer = null;
         }
 
         async function loadServerHealth() {
@@ -662,11 +1001,26 @@
         });
 
         if (refreshButton) {
-            refreshButton.addEventListener('click', loadServerHealth);
+            refreshButton.addEventListener('click', async () => {
+                await loadServerHealth();
+                await loadMonitorSnapshot();
+            });
         }
 
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopMonitorPolling();
+                return;
+            }
+            if (isMonitorSectionVisible()) {
+                startMonitorPolling();
+                loadMonitorSnapshot({ silent: true });
+            }
+        });
+
+        window.addEventListener('beforeunload', stopMonitorPolling);
+
         activateSection('user-management');
-        loadServerHealth();
     })();
 </script>
 {% endblock %}

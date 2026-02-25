@@ -15,6 +15,10 @@ import logging
 import re
 from pydantic import BaseModel
 import jwt
+try:
+    import psutil
+except ImportError:  # pragma: no cover - handled at runtime
+    psutil = None
 
 from core import (
     Generator,
@@ -130,6 +134,13 @@ CSRF_EXEMPT_PATHS = {
     "/health",
 }
 ALLOWED_ROLES = {ROLE_ADMIN, ROLE_OPERATOR}
+MONITOR_CPU_HIGH_THRESHOLD = 80.0
+MONITOR_CPU_CRITICAL_THRESHOLD = 90.0
+MONITOR_MEMORY_HIGH_THRESHOLD = 80.0
+MONITOR_MEMORY_CRITICAL_THRESHOLD = 90.0
+MONITOR_TEMP_HIGH_THRESHOLD = 75.0
+MONITOR_TEMP_CRITICAL_THRESHOLD = 85.0
+MONITOR_TEMP_PREFERRED_SENSORS = ("coretemp", "cpu_thermal", "k10temp")
 
 # Exception handler for validation errors
 @app.exception_handler(RequestValidationError)
@@ -714,6 +725,112 @@ async def app_info():
         "title": APP_TITLE,
         "version": APP_VERSION,
         "database": DB_PATH,
+    }
+
+
+def _classify_resource_usage(value: float, high_threshold: float, critical_threshold: float) -> str:
+    """Classify usage values into normal/high/critical."""
+    if value >= critical_threshold:
+        return "critical"
+    if value >= high_threshold:
+        return "high"
+    return "normal"
+
+
+def _build_temperature_unavailable(note: str) -> Dict[str, Any]:
+    """Return a standardized payload when temperature is not available."""
+    return {
+        "available": False,
+        "celsius": None,
+        "sensor": None,
+        "status": "unknown",
+        "note": note,
+    }
+
+
+def _collect_temperature_metrics() -> Dict[str, Any]:
+    """Collect server temperature from psutil sensors API."""
+    if psutil is None:
+        return _build_temperature_unavailable("Temperature monitor unavailable (psutil not installed)")
+
+    if not hasattr(psutil, "sensors_temperatures"):
+        return _build_temperature_unavailable("Temperature sensor API unavailable on this platform")
+
+    try:
+        sensor_map = psutil.sensors_temperatures(fahrenheit=False) or {}
+    except Exception:
+        logger.warning("Failed reading temperature sensors", exc_info=True)
+        return _build_temperature_unavailable("Temperature sensor read failed")
+
+    if not sensor_map:
+        return _build_temperature_unavailable("Temperature sensor not available on this host")
+
+    ordered_sensor_keys: List[str] = []
+    for sensor_key in MONITOR_TEMP_PREFERRED_SENSORS:
+        if sensor_key in sensor_map:
+            ordered_sensor_keys.append(sensor_key)
+    for sensor_key in sensor_map.keys():
+        if sensor_key not in ordered_sensor_keys:
+            ordered_sensor_keys.append(sensor_key)
+
+    for sensor_key in ordered_sensor_keys:
+        entries = sensor_map.get(sensor_key) or []
+        for entry in entries:
+            current = getattr(entry, "current", None)
+            if current is None:
+                continue
+            try:
+                temp_celsius = float(current)
+            except (TypeError, ValueError):
+                continue
+            return {
+                "available": True,
+                "celsius": round(temp_celsius, 1),
+                "sensor": sensor_key,
+                "status": _classify_resource_usage(
+                    temp_celsius,
+                    MONITOR_TEMP_HIGH_THRESHOLD,
+                    MONITOR_TEMP_CRITICAL_THRESHOLD,
+                ),
+                "note": "",
+            }
+
+    return _build_temperature_unavailable("Temperature sensor not available on this host")
+
+
+def _collect_monitor_live_metrics() -> Dict[str, Any]:
+    """Collect CPU, memory and temperature metrics for monitor view."""
+    if psutil is None:
+        raise RuntimeError("Monitor metrics backend unavailable (psutil not installed)")
+
+    cpu_percent = float(psutil.cpu_percent(interval=None))
+    memory = psutil.virtual_memory()
+    memory_percent = float(memory.percent)
+    used_mb = float(memory.used) / (1024 * 1024)
+    total_mb = float(memory.total) / (1024 * 1024)
+    temperature = _collect_temperature_metrics()
+
+    return {
+        "timestamp": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "cpu": {
+            "percent": round(cpu_percent, 1),
+            "status": _classify_resource_usage(
+                cpu_percent,
+                MONITOR_CPU_HIGH_THRESHOLD,
+                MONITOR_CPU_CRITICAL_THRESHOLD,
+            ),
+        },
+        "memory": {
+            "percent": round(memory_percent, 1),
+            "used_mb": round(used_mb, 1),
+            "total_mb": round(total_mb, 1),
+            "status": _classify_resource_usage(
+                memory_percent,
+                MONITOR_MEMORY_HIGH_THRESHOLD,
+                MONITOR_MEMORY_CRITICAL_THRESHOLD,
+            ),
+        },
+        "temperature": temperature,
     }
 
 
@@ -1453,6 +1570,23 @@ async def admin_delete_user(
 # ============================================================================
 # API ENDPOINTS
 # ============================================================================
+
+@app.get("/api/monitor/live")
+async def api_monitor_live(
+    _: Any = Depends(require_role(ROLE_ADMIN)),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Return live server monitor metrics for monitor tab."""
+    try:
+        # Keep DB dependency to stay aligned with authenticated API dependency patterns.
+        _ = conn
+        return _collect_monitor_live_metrics()
+    except RuntimeError as e:
+        logger.error(f"Monitor metrics unavailable: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error collecting monitor metrics: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/generators")
 async def api_generators(conn: sqlite3.Connection = Depends(get_db)):
