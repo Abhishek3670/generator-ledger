@@ -140,6 +140,89 @@
                         {% endif %}
                     </section>
 
+                    <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                        <div class="flex flex-wrap items-start justify-between gap-4">
+                            <div>
+                                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Access Control</div>
+                                <h2 class="mt-2 text-xl font-semibold text-slate-900">Permission Matrix</h2>
+                                <p class="mt-1 text-sm text-slate-500">Feature-level roles with endpoint references and per-user effective access.</p>
+                            </div>
+                            <div class="w-full sm:w-72">
+                                <label for="permissionMatrixUserSelect" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Selected User</label>
+                                <select
+                                    id="permissionMatrixUserSelect"
+                                    class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+                                    {% if not permission_matrix_users %}disabled{% endif %}
+                                >
+                                    {% if permission_matrix_users %}
+                                        {% for pm_user in permission_matrix_users %}
+                                        <option value="{{ pm_user.id }}" {% if permission_matrix_default_user_id is not none and pm_user.id == permission_matrix_default_user_id %}selected{% endif %}>
+                                            {{ pm_user.username }} ({{ pm_user.role }}){% if not pm_user.is_active %} • inactive{% endif %}
+                                        </option>
+                                        {% endfor %}
+                                    {% else %}
+                                        <option value="">No users available</option>
+                                    {% endif %}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div id="permissionMatrixUserMeta" class="mt-3 text-xs text-slate-500">
+                            {% if permission_matrix_users %}
+                            Select a user to view effective permissions.
+                            {% else %}
+                            No users found for effective permission evaluation.
+                            {% endif %}
+                        </div>
+
+                        {% if permission_matrix_rows %}
+                        <div class="mt-6 overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm">
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full border-collapse text-sm">
+                                    <thead>
+                                        <tr>
+                                            <th class="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold text-slate-700">Capability</th>
+                                            <th class="border border-slate-300 bg-slate-50 px-3 py-2 text-center font-semibold text-slate-700">Admin</th>
+                                            <th class="border border-slate-300 bg-slate-50 px-3 py-2 text-center font-semibold text-slate-700">Operator</th>
+                                            <th class="border border-slate-300 bg-slate-50 px-3 py-2 text-center font-semibold text-slate-700">Selected User</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for row in permission_matrix_rows %}
+                                        <tr
+                                            data-permission-matrix-row
+                                            data-admin-allowed="{{ '1' if row.admin_allowed else '0' }}"
+                                            data-operator-allowed="{{ '1' if row.operator_allowed else '0' }}"
+                                        >
+                                            <td class="border border-slate-300 bg-white px-3 py-2">
+                                                <div class="font-medium text-slate-900">{{ row.label }}</div>
+                                            </td>
+                                            <td class="border border-slate-300 px-3 py-2 text-center align-middle {{ 'bg-emerald-200' if row.admin_allowed else 'bg-rose-200' }}">
+                                                <span class="font-bold {{ 'text-emerald-900' if row.admin_allowed else 'text-rose-900' }}">
+                                                    {{ 'Y' if row.admin_allowed else 'N' }}
+                                                </span>
+                                            </td>
+                                            <td class="border border-slate-300 px-3 py-2 text-center align-middle {{ 'bg-emerald-200' if row.operator_allowed else 'bg-rose-200' }}">
+                                                <span class="font-bold {{ 'text-emerald-900' if row.operator_allowed else 'text-rose-900' }}">
+                                                    {{ 'Y' if row.operator_allowed else 'N' }}
+                                                </span>
+                                            </td>
+                                            <td class="border border-slate-300 px-3 py-2 text-center align-middle" data-effective-cell>
+                                                <span data-effective-badge class="font-bold">-</span>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% else %}
+                        <div class="mt-4 rounded-xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
+                            Permission matrix is not available.
+                        </div>
+                        {% endif %}
+                    </section>
+
                 </section>
 
                 <section data-settings-section="monitor" class="hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -251,6 +334,8 @@
         </div>
     </div>
 </div>
+
+<script id="permissionMatrixUsersData" type="application/json">{{ permission_matrix_users_json | safe }}</script>
 
 <div id="createUserModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
     <div class="w-full max-w-xl rounded-2xl bg-white shadow-xl">
@@ -394,6 +479,19 @@
         const editUserConfirmPassword = document.getElementById('editUserConfirmPassword');
         const editUserPasswordMismatchError = document.getElementById('editUserPasswordMismatchError');
         const editUserButtons = Array.from(document.querySelectorAll('.js-open-edit-user-modal'));
+        const permissionMatrixUserSelect = document.getElementById('permissionMatrixUserSelect');
+        const permissionMatrixUserMeta = document.getElementById('permissionMatrixUserMeta');
+        const permissionMatrixRows = Array.from(document.querySelectorAll('[data-permission-matrix-row]'));
+        const permissionMatrixUsersDataNode = document.getElementById('permissionMatrixUsersData');
+        let permissionMatrixUsers = [];
+        if (permissionMatrixUsersDataNode) {
+            try {
+                permissionMatrixUsers = JSON.parse(permissionMatrixUsersDataNode.textContent || '[]');
+            } catch (_error) {
+                permissionMatrixUsers = [];
+            }
+        }
+        const permissionMatrixUserMap = new Map(permissionMatrixUsers.map((user) => [String(user.id), user]));
 
         const activeClasses = ['border-slate-300', 'bg-slate-900', 'text-white'];
         const inactiveClasses = ['border-slate-200', 'bg-white', 'text-slate-900', 'hover:border-slate-300', 'hover:bg-slate-50'];
@@ -405,6 +503,14 @@
         const badgeUnhealthyClasses = ['bg-rose-100', 'text-rose-700'];
         const badgeWarningClasses = ['bg-amber-100', 'text-amber-700'];
         const badgeUnknownClasses = ['bg-slate-200', 'text-slate-700'];
+        const permissionAllowedClasses = ['bg-emerald-200', 'text-emerald-900'];
+        const permissionDeniedClasses = ['bg-rose-200', 'text-rose-900'];
+        const permissionUnknownClasses = ['bg-slate-200', 'text-slate-900'];
+        const permissionBadgeClasses = [
+            ...permissionAllowedClasses,
+            ...permissionDeniedClasses,
+            ...permissionUnknownClasses
+        ];
         const monitorBadgeClasses = [
             ...badgeHealthyClasses,
             ...badgeWarningClasses,
@@ -625,6 +731,89 @@
                 return new Date().toLocaleTimeString('en-US', { hour12: false });
             }
             return dt.toLocaleTimeString('en-US', { hour12: false });
+        }
+
+        function formatRoleLabel(role) {
+            const normalized = String(role || '').toLowerCase();
+            if (normalized === 'admin') return 'Admin';
+            if (normalized === 'operator') return 'Operator';
+            return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : 'Unknown';
+        }
+
+        function applyPermissionBadge(element, state, label) {
+            if (!element) return;
+            const cell = element.closest('[data-effective-cell]');
+            if (!cell) return;
+
+            cell.classList.remove(...permissionBadgeClasses);
+            if (state === 'allow') {
+                cell.classList.add(...permissionAllowedClasses);
+            } else if (state === 'deny') {
+                cell.classList.add(...permissionDeniedClasses);
+            } else {
+                cell.classList.add(...permissionUnknownClasses);
+            }
+
+            if (label) {
+                element.textContent = label;
+                return;
+            }
+            if (state === 'allow') {
+                element.textContent = 'Y';
+            } else if (state === 'deny') {
+                element.textContent = 'N';
+            } else {
+                element.textContent = '-';
+            }
+        }
+
+        function updatePermissionMatrixEffective(userId) {
+            if (!permissionMatrixRows.length) return;
+            const selected = permissionMatrixUserMap.get(String(userId || ''));
+
+            permissionMatrixRows.forEach((row) => {
+                const badge = row.querySelector('[data-effective-badge]');
+                if (!badge) return;
+
+                if (!selected) {
+                    applyPermissionBadge(badge, 'unknown');
+                    badge.removeAttribute('title');
+                    return;
+                }
+
+                const adminAllowed = row.getAttribute('data-admin-allowed') === '1';
+                const operatorAllowed = row.getAttribute('data-operator-allowed') === '1';
+                const role = String(selected.role || '').toLowerCase();
+                const isActive = Boolean(selected.is_active);
+                let effectiveAllowed = false;
+                if (isActive) {
+                    if (role === 'admin') {
+                        effectiveAllowed = adminAllowed;
+                    } else if (role === 'operator') {
+                        effectiveAllowed = operatorAllowed;
+                    }
+                }
+
+                applyPermissionBadge(badge, effectiveAllowed ? 'allow' : 'deny');
+                if (!isActive) {
+                    badge.title = 'Inactive user: effective permissions are denied';
+                } else {
+                    badge.removeAttribute('title');
+                }
+            });
+
+            if (!permissionMatrixUserMeta) return;
+            if (!selected) {
+                permissionMatrixUserMeta.textContent = 'Select a user to view effective permissions.';
+                return;
+            }
+
+            const roleLabel = formatRoleLabel(selected.role);
+            if (selected.is_active) {
+                permissionMatrixUserMeta.textContent = `${selected.username} • ${roleLabel} • active account`;
+                return;
+            }
+            permissionMatrixUserMeta.textContent = `${selected.username} • ${roleLabel} • inactive account (all effective permissions denied)`;
         }
 
         function applyMonitorBadge(element, status) {
@@ -985,6 +1174,12 @@
             });
         }
 
+        if (permissionMatrixUserSelect) {
+            permissionMatrixUserSelect.addEventListener('change', () => {
+                updatePermissionMatrixEffective(permissionMatrixUserSelect.value);
+            });
+        }
+
         window.addEventListener('click', (event) => {
             if (event.target === createUserModal) {
                 closeCreateModal();
@@ -1019,6 +1214,11 @@
         });
 
         window.addEventListener('beforeunload', stopMonitorPolling);
+
+        if (permissionMatrixRows.length) {
+            const initialUserId = permissionMatrixUserSelect ? permissionMatrixUserSelect.value : '';
+            updatePermissionMatrixEffective(initialUserId);
+        }
 
         activateSection('user-management');
     })();

@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.exceptions import RequestValidationError
 import os
+import json
 import sqlite3
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any, Tuple
@@ -166,6 +167,125 @@ HISTORY_EVENT_ACTION_LABELS = {
     "booking_cancelled": "Genset Cancelled",
     "booking_deleted": "Genset Removed",
 }
+PERMISSION_MATRIX_CAPABILITIES = (
+    {
+        "key": "settings_user_admin",
+        "label": "Settings & User Admin",
+        "description": "Access settings and manage user accounts.",
+        "endpoint_refs": (
+            "GET /admin/settings",
+            "POST /admin/settings/users/create",
+            "POST /admin/settings/users/{user_id}/update",
+            "POST /admin/settings/users/{user_id}/password",
+            "POST /admin/settings/users/{user_id}/delete",
+        ),
+        "admin_allowed": True,
+        "operator_allowed": False,
+    },
+    {
+        "key": "monitor_access",
+        "label": "Monitor",
+        "description": "View live monitor metrics and health checks.",
+        "endpoint_refs": (
+            "GET /api/monitor/live",
+            "GET /health",
+            "GET /api/info",
+        ),
+        "admin_allowed": True,
+        "operator_allowed": False,
+    },
+    {
+        "key": "vendor_management",
+        "label": "Vendor Management",
+        "description": "Create, update, and delete vendors.",
+        "endpoint_refs": (
+            "POST /api/vendors",
+            "PATCH /api/vendors/{vendor_id}",
+            "DELETE /api/vendors/{vendor_id}",
+        ),
+        "admin_allowed": True,
+        "operator_allowed": False,
+    },
+    {
+        "key": "generator_management",
+        "label": "Generator Management",
+        "description": "Create generator records.",
+        "endpoint_refs": (
+            "POST /api/generators",
+        ),
+        "admin_allowed": True,
+        "operator_allowed": False,
+    },
+    {
+        "key": "booking_create_update",
+        "label": "Booking Create/Update",
+        "description": "Create bookings and manage booking items.",
+        "endpoint_refs": (
+            "POST /api/bookings",
+            "POST /api/bookings/{booking_id}/items",
+            "POST /api/bookings/{booking_id}/items/bulk-update",
+            "POST /api/bookings/{booking_id}/cancel",
+        ),
+        "admin_allowed": True,
+        "operator_allowed": True,
+    },
+    {
+        "key": "booking_delete",
+        "label": "Booking Delete",
+        "description": "Delete existing bookings.",
+        "endpoint_refs": (
+            "DELETE /api/bookings/{booking_id}",
+        ),
+        "admin_allowed": True,
+        "operator_allowed": False,
+    },
+    {
+        "key": "billing_access",
+        "label": "Billing Access",
+        "description": "Access billing pages and billing line APIs.",
+        "endpoint_refs": (
+            "GET /billing",
+            "GET /api/billing/lines",
+        ),
+        "admin_allowed": True,
+        "operator_allowed": True,
+    },
+    {
+        "key": "export_access",
+        "label": "Export",
+        "description": "Export data via API.",
+        "endpoint_refs": (
+            "GET /api/export",
+        ),
+        "admin_allowed": True,
+        "operator_allowed": False,
+    },
+    {
+        "key": "read_only_operational_views",
+        "label": "Read-only Operational Views",
+        "description": "View operational pages and read APIs.",
+        "endpoint_refs": (
+            "GET /",
+            "GET /bookings",
+            "GET /history",
+            "GET /vendors",
+            "GET /generators",
+            "GET /create-booking",
+            "GET /booking/{booking_id}",
+            "GET /booking/{booking_id}/edit",
+            "GET /api/bookings",
+            "GET /api/bookings/{booking_id}",
+            "GET /api/vendors",
+            "GET /api/vendors/{vendor_id}/bookings",
+            "GET /api/generators",
+            "GET /api/generators/{generator_id}/bookings",
+            "GET /api/calendar/events",
+            "GET /api/calendar/day",
+        ),
+        "admin_allowed": True,
+        "operator_allowed": True,
+    },
+)
 
 # Exception handler for validation errors
 @app.exception_handler(RequestValidationError)
@@ -1313,6 +1433,50 @@ def _history_build_filter_chips(entries: List[Dict[str, Any]]) -> List[Dict[str,
     return chips
 
 
+def _build_permission_matrix_rows() -> List[Dict[str, Any]]:
+    """Return normalized permission matrix rows for the settings template."""
+    rows: List[Dict[str, Any]] = []
+    for row in PERMISSION_MATRIX_CAPABILITIES:
+        rows.append({
+            "key": row["key"],
+            "label": row["label"],
+            "description": row["description"],
+            "endpoint_refs": list(row["endpoint_refs"]),
+            "admin_allowed": bool(row["admin_allowed"]),
+            "operator_allowed": bool(row["operator_allowed"]),
+        })
+    return rows
+
+
+def _resolve_effective_permission(role: str, is_active: bool, row: Dict[str, Any]) -> bool:
+    """Resolve effective access from role + active state for a matrix row."""
+    if not is_active:
+        return False
+
+    normalized_role = (role or "").strip().lower()
+    if normalized_role == ROLE_ADMIN:
+        return bool(row.get("admin_allowed"))
+    if normalized_role == ROLE_OPERATOR:
+        return bool(row.get("operator_allowed"))
+    return False
+
+
+def _build_permission_matrix_users(users: List[Any]) -> List[Dict[str, Any]]:
+    """Normalize settings users for client-side effective-permission rendering."""
+    rows: List[Dict[str, Any]] = []
+    for user in users:
+        user_id = getattr(user, "id", None)
+        if user_id is None:
+            continue
+        rows.append({
+            "id": int(user_id),
+            "username": str(getattr(user, "username", "") or ""),
+            "role": str(getattr(user, "role", "") or "").strip().lower(),
+            "is_active": bool(getattr(user, "is_active", False)),
+        })
+    return rows
+
+
 @app.get("/history", response_class=HTMLResponse)
 async def history_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     """Booking history page."""
@@ -1556,11 +1720,35 @@ async def admin_settings_page(
     """Admin settings page."""
     repo = UserRepository(conn)
     users = repo.list_all()
+    permission_matrix_rows = _build_permission_matrix_rows()
+    permission_matrix_users = _build_permission_matrix_users(users)
+    current_user = getattr(request.state, "user", None)
+
+    default_user_id: Optional[int] = None
+    current_user_id = getattr(current_user, "id", None)
+    if current_user_id is not None:
+        for user in permission_matrix_users:
+            if user["id"] == int(current_user_id):
+                default_user_id = int(current_user_id)
+                break
+    if default_user_id is None and permission_matrix_users:
+        default_user_id = permission_matrix_users[0]["id"]
+    permission_matrix_users_json = json.dumps(permission_matrix_users).replace("<", "\\u003c")
+
     message = request.query_params.get("message")
     error = request.query_params.get("error")
     return templates.TemplateResponse(
         "settings.html",
-        template_context(request, users=users, message=message, error=error)
+        template_context(
+            request,
+            users=users,
+            message=message,
+            error=error,
+            permission_matrix_rows=permission_matrix_rows,
+            permission_matrix_users=permission_matrix_users,
+            permission_matrix_users_json=permission_matrix_users_json,
+            permission_matrix_default_user_id=default_user_id,
+        )
     )
 
 
