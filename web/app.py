@@ -248,7 +248,7 @@ PERMISSION_MATRIX_CAPABILITIES = (
             "GET /api/billing/lines",
         ),
         "admin_allowed": True,
-        "operator_allowed": True,
+        "operator_allowed": False,
     },
     {
         "key": "export_access",
