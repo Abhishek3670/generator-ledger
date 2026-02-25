@@ -133,14 +133,72 @@
         <div class="mt-6 flex flex-wrap items-center gap-3">
             <button onclick="saveChanges()" class="rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-400">Save Changes</button>
             <button onclick="addNewGenerator()" class="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">Add Generator</button>
+            {% if user and user.role == 'admin' %}
+            <button onclick="openDeleteBookingDialog()" class="rounded-full bg-rose-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500">Delete Booking</button>
+            {% endif %}
             <a href="/bookings" class="rounded-full border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">Back to Bookings</a>
         </div>
     </div>
 </div>
 
+{% if user and user.role == 'admin' %}
+<div id="deleteBookingDialog" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
+    <div class="w-full max-w-md rounded-2xl bg-white shadow-xl">
+        <div class="border-b border-slate-200 px-6 py-4">
+            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Delete Booking</div>
+            <h2 class="mt-1 text-lg font-semibold text-slate-900">{{ booking.booking_id }}</h2>
+        </div>
+        <div class="space-y-4 px-6 py-5">
+            <p id="deleteBookingReason" class="text-sm text-slate-600">
+                Delete this booking permanently?
+            </p>
+            <p class="text-xs text-slate-500">
+                This action cannot be undone.
+            </p>
+            <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
+                <button type="button" onclick="closeDeleteBookingDialog()" class="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                    Cancel
+                </button>
+                <button type="button" onclick="confirmDeleteBooking()" class="rounded-full bg-rose-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500">
+                    Confirm Delete
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <script>
 let itemsToUpdate = {};
 let itemsToRemove = [];
+const deleteBookingDialog = document.getElementById('deleteBookingDialog');
+const deleteBookingReason = document.getElementById('deleteBookingReason');
+
+function openDeleteBookingDialog(reasonText) {
+    if (!deleteBookingDialog) {
+        if (reasonText) {
+            alert(reasonText);
+        }
+        return;
+    }
+    if (deleteBookingReason) {
+        deleteBookingReason.textContent = reasonText || 'Delete this booking permanently?';
+    }
+    deleteBookingDialog.classList.remove('hidden');
+    deleteBookingDialog.classList.add('flex');
+}
+
+function closeDeleteBookingDialog() {
+    if (!deleteBookingDialog) return;
+    deleteBookingDialog.classList.add('hidden');
+    deleteBookingDialog.classList.remove('flex');
+}
+
+window.addEventListener('click', function(event) {
+    if (event.target === deleteBookingDialog) {
+        closeDeleteBookingDialog();
+    }
+});
 
 function removeItem(button) {
     const row = button.closest('tr');
@@ -226,21 +284,46 @@ function saveChanges() {
             removes: itemsToRemove
         })
     })
-    .then(response => {
+    .then(async response => {
         if (response.ok) {
             alert('Changes saved successfully!');
             window.location.href = '/bookings';
         } else if (response.status === 401) {
             window.location.href = '/login';
         } else {
-            return response.json().then(data => {
-                alert('Error saving changes: ' + (data.detail || 'Unknown error'));
-            });
+            const data = await response.json().catch(() => ({}));
+            const detail = data.detail || 'Unknown error';
+            if (response.status === 400 && detail.includes('Cannot remove all booking items')) {
+                openDeleteBookingDialog('All assigned gensets were removed. Delete this booking instead?');
+                return;
+            }
+            alert('Error saving changes: ' + detail);
         }
     })
     .catch(error => {
         alert('Error saving changes: ' + error);
     });
+}
+
+async function confirmDeleteBooking() {
+    try {
+        const response = await fetch(`/api/bookings/{{ booking.booking_id }}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            closeDeleteBookingDialog();
+            alert('Booking deleted successfully!');
+            window.location.href = '/bookings';
+        } else if (response.status === 401) {
+            window.location.href = '/login';
+        } else {
+            const data = await response.json().catch(() => ({}));
+            alert('Error deleting booking: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (error) {
+        alert('Error deleting booking: ' + error);
+    }
 }
 </script>
 {% endblock %}

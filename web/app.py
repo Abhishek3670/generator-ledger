@@ -2682,6 +2682,24 @@ async def api_bulk_update_items(
         updates = request_data.get("updates", [])
         removes = request_data.get("removes", [])
 
+        cur.execute(
+            "SELECT id FROM booking_items WHERE booking_id = ?",
+            (booking_id,),
+        )
+        existing_item_ids = {str(row[0]) for row in cur.fetchall()}
+        remove_item_ids = {str(item_id) for item_id in removes}
+        remaining_item_ids = existing_item_ids - remove_item_ids
+
+        if existing_item_ids and not remaining_item_ids:
+            logger.warning(
+                "Booking items update blocked | context="
+                f"{{'booking_id': '{booking_id}', 'reason': 'attempt to remove all items'}}"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot remove all booking items. Use Delete Booking to remove this booking.",
+            )
+
         availability = AvailabilityChecker(conn)
         history_items: List[Dict[str, str]] = []
         if updates or removes:
