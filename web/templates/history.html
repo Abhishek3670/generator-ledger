@@ -2,8 +2,47 @@
 
 {% block head %}
 <style>
-    .history-shell {
+.history-shell {
         background: linear-gradient(180deg, #f8fafc 0%, #ffffff 45%, #f8fafc 100%);
+    }
+    .history-layout {
+        display: flex;
+        flex-direction: column;
+    }
+    .history-stream {
+        margin-top: 1.5rem;
+    }
+    .history-stream-scroll {
+        max-height: min(68vh, 760px);
+        min-height: 360px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding-right: 0;
+        border: 1px solid #e2e8f0;
+        border-top: 0;
+        border-bottom-left-radius: 1rem;
+        border-bottom-right-radius: 1rem;
+        background: #ffffff;
+        position: relative;
+    }
+    .history-stream-scroll::-webkit-scrollbar {
+        width: 1.1rem;
+    }
+    .history-stream-scroll::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .history-stream-scroll::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-left: 0.2rem solid transparent;
+        border-right: 0.2rem solid transparent;
+        border-top: 0;
+        border-bottom: 0;
+        background-clip: padding-box;
+        border-radius: 9999px;
+        min-height: 5.5rem;
+    }
+    .history-groups {
+        padding-top: 0;
     }
     .history-toolbar {
         border: 1px solid #e2e8f0;
@@ -35,7 +74,8 @@
         grid-template-columns: 70px minmax(0, 1fr) 180px;
         gap: 0.75rem;
         border: 1px solid #e2e8f0;
-        border-radius: 0.75rem;
+        border-top-left-radius: 0.75rem;
+        border-top-right-radius: 0.75rem;
         padding: 0.65rem 0.9rem;
         color: #64748b;
         font-size: 0.68rem;
@@ -46,15 +86,23 @@
     }
     .history-group {
         border: 1px solid #e2e8f0;
-        border-radius: 1rem;
+        border-radius: 0;
         background: #ffffff;
-        overflow: hidden;
+        overflow: visible;
         box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
     }
+    .history-group:first-child {
+        margin-top: 0;
+    }
     .history-group-head {
-        position: static;
+        position: sticky;
+        top: 0;
+        z-index: 12;
         border-bottom: 1px solid #e2e8f0;
         background: #f8fafc;
+        backdrop-filter: blur(2px);
+        border-top-left-radius: 0;
+        border-top-right-radius: 0;
     }
     .history-group-head h2 {
         margin: 0;
@@ -267,13 +315,13 @@
 {% endblock %}
 
 {% block content %}
-<div class="history-shell min-h-screen">
-    <div class="mx-auto max-w-6xl px-4 py-10 lg:py-12" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
+<div class="history-shell">
+    <div class="history-layout mx-auto max-w-6xl px-4 py-10 lg:py-12" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
         <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
                 <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">History</div>
                 <h1 class="mt-2 text-2xl font-semibold text-slate-900">Booking Activity Graph</h1>
-                <p class="mt-1 text-sm text-slate-500">GitLens-style event stream for booking changes and audit activity.</p>
+                <p class="mt-1 text-sm text-slate-500">Event stream for booking changes and audit activity.</p>
             </div>
             <div class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
                 {{ history_total_count or 0 }} event{{ '' if (history_total_count or 0) == 1 else 's' }}
@@ -303,126 +351,130 @@
             </div>
         </div>
 
-        <div class="history-column-head mt-6">
-            <span>Graph</span>
-            <span>Commit Message</span>
-            <span class="hidden lg:block">Author / Meta</span>
-        </div>
+        <div class="history-stream">
+            <div class="history-column-head">
+                <span>Graph</span>
+                <span>Commit Message</span>
+                <span class="hidden lg:block">Author / Meta</span>
+            </div>
 
-        <div id="historyGroups" class="mt-4 space-y-5">
-            {% for group in history_groups %}
-            <section class="history-group" data-history-group>
-                <div class="history-group-head px-4 py-3">
-                    <div class="flex items-center justify-between gap-3">
-                        <h2 class="text-sm font-semibold text-slate-900">{{ group.date_label }}</h2>
-                        <span class="text-xs text-slate-500">{{ group.entries|length }} event{{ '' if group.entries|length == 1 else 's' }}</span>
-                    </div>
-                </div>
-                <div>
-                    {% for entry in group.entries %}
-                    <article
-                        class="history-entry{% if loop.last %} is-last{% endif %}"
-                        data-history-entry
-                        data-history-category="{{ entry.event_category }}"
-                        data-history-search="{{ entry.search_blob }}"
-                    >
-                        <div class="history-lane" aria-hidden="true">
-                            <span class="history-lane-line"></span>
-                            <span class="history-node history-node-{{ entry.event_category }}"></span>
+            <div class="history-stream-scroll">
+                <div id="historyGroups" class="history-groups space-y-5">
+                    {% for group in history_groups %}
+                    <section class="history-group" data-history-group>
+                        <div class="history-group-head px-4 py-3">
+                            <div class="flex items-center justify-between gap-3">
+                                <h2 class="text-sm font-semibold text-slate-900">{{ group.date_label }}</h2>
+                                <span class="text-xs text-slate-500">{{ group.entries|length }} event{{ '' if group.entries|length == 1 else 's' }}</span>
+                            </div>
                         </div>
-
                         <div>
-                            <div class="history-card-head">
-                                <div class="history-summary">{{ entry.summary }}</div>
-                                <div class="flex items-center gap-2">
-                                    <span class="history-tag history-tag-{{ entry.event_category }}">{{ entry.event_action_label }}</span>
-                                    <code class="history-hash">{{ entry.short_hash }}</code>
-                                </div>
-                            </div>
-
-                            <div class="history-meta">
-                                <span>{{ entry.user or '-' }}</span>
-                                <span class="history-meta-sep">•</span>
-                                <span>{{ entry.vendor_name or '-' }}</span>
-                                {% if entry.booking_id %}
-                                <span class="history-meta-sep">•</span>
-                                <span class="font-semibold text-slate-700">{{ entry.booking_id }}</span>
-                                {% endif %}
-                                <span class="history-meta-sep">•</span>
-                                <span
-                                    class="js-relative-time"
-                                    data-time-iso="{{ entry.event_time_iso }}"
-                                    data-time-raw="{{ entry.event_time_raw }}"
-                                    title="{{ entry.event_time_raw }}"
-                                >{{ entry.event_time_raw }}</span>
-                                {% if entry.view_link %}
-                                <span class="history-meta-sep">•</span>
-                                <a href="{{ entry.view_link }}" class="history-view-link">View</a>
-                                {% endif %}
-                            </div>
-
-                            <button
-                                type="button"
-                                class="history-toggle"
-                                data-history-toggle
-                                data-history-target="history-details-{{ group.date_key }}-{{ loop.index0 }}"
+                            {% for entry in group.entries %}
+                            <article
+                                class="history-entry{% if loop.last %} is-last{% endif %}"
+                                data-history-entry
+                                data-history-category="{{ entry.event_category }}"
+                                data-history-search="{{ entry.search_blob }}"
                             >
-                                Show details
-                            </button>
-
-                            <div id="history-details-{{ group.date_key }}-{{ loop.index0 }}" class="history-details hidden" data-history-details>
-                                <div class="history-details-grid">
-                                    <div class="history-details-cell">
-                                        <div class="history-details-label">Event Type</div>
-                                        <div class="history-details-value">{{ entry.event_type or '-' }}</div>
-                                    </div>
-                                    <div class="history-details-cell">
-                                        <div class="history-details-label">User</div>
-                                        <div class="history-details-value">{{ entry.user or '-' }}</div>
-                                    </div>
-                                    <div class="history-details-cell">
-                                        <div class="history-details-label">Vendor</div>
-                                        <div class="history-details-value">{{ entry.vendor_name or '-' }}</div>
-                                    </div>
-                                    <div class="history-details-cell">
-                                        <div class="history-details-label">Vendor ID</div>
-                                        <div class="history-details-value">{{ entry.vendor_id or '-' }}</div>
-                                    </div>
-                                    <div class="history-details-cell">
-                                        <div class="history-details-label">Booking ID</div>
-                                        <div class="history-details-value">{{ entry.booking_id or '-' }}</div>
-                                    </div>
-                                    <div class="history-details-cell">
-                                        <div class="history-details-label">Generators</div>
-                                        <div class="history-details-value">{{ entry.generators_summary or '-' }}</div>
-                                    </div>
+                                <div class="history-lane" aria-hidden="true">
+                                    <span class="history-lane-line"></span>
+                                    <span class="history-node history-node-{{ entry.event_category }}"></span>
                                 </div>
 
-                                {% if entry.items_structured %}
-                                <ul class="history-item-list">
-                                    {% for item in entry.items_structured %}
-                                    <li>
-                                        <span>{{ item.label }}</span>
-                                        <span class="text-slate-500">{{ item.date }}</span>
-                                    </li>
-                                    {% endfor %}
-                                </ul>
-                                {% else %}
-                                <div class="px-3 py-2 text-xs text-slate-500">No parsed generator items available.</div>
-                                {% endif %}
+                                <div>
+                                    <div class="history-card-head">
+                                        <div class="history-summary">{{ entry.summary }}</div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="history-tag history-tag-{{ entry.event_category }}">{{ entry.event_action_label }}</span>
+                                            <code class="history-hash">{{ entry.short_hash }}</code>
+                                        </div>
+                                    </div>
 
-                                <pre class="history-raw">{{ entry.details_raw or '-' }}</pre>
-                            </div>
+                                    <div class="history-meta">
+                                        <span>{{ entry.user or '-' }}</span>
+                                        <span class="history-meta-sep">•</span>
+                                        <span>{{ entry.vendor_name or '-' }}</span>
+                                        {% if entry.booking_id %}
+                                        <span class="history-meta-sep">•</span>
+                                        <span class="font-semibold text-slate-700">{{ entry.booking_id }}</span>
+                                        {% endif %}
+                                        <span class="history-meta-sep">•</span>
+                                        <span
+                                            class="js-relative-time"
+                                            data-time-iso="{{ entry.event_time_iso }}"
+                                            data-time-raw="{{ entry.event_time_raw }}"
+                                            title="{{ entry.event_time_raw }}"
+                                        >{{ entry.event_time_raw }}</span>
+                                        {% if entry.view_link %}
+                                        <span class="history-meta-sep">•</span>
+                                        <a href="{{ entry.view_link }}" class="history-view-link">View</a>
+                                        {% endif %}
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        class="history-toggle"
+                                        data-history-toggle
+                                        data-history-target="history-details-{{ group.date_key }}-{{ loop.index0 }}"
+                                    >
+                                        Show details
+                                    </button>
+
+                                    <div id="history-details-{{ group.date_key }}-{{ loop.index0 }}" class="history-details hidden" data-history-details>
+                                        <div class="history-details-grid">
+                                            <div class="history-details-cell">
+                                                <div class="history-details-label">Event Type</div>
+                                                <div class="history-details-value">{{ entry.event_type or '-' }}</div>
+                                            </div>
+                                            <div class="history-details-cell">
+                                                <div class="history-details-label">User</div>
+                                                <div class="history-details-value">{{ entry.user or '-' }}</div>
+                                            </div>
+                                            <div class="history-details-cell">
+                                                <div class="history-details-label">Vendor</div>
+                                                <div class="history-details-value">{{ entry.vendor_name or '-' }}</div>
+                                            </div>
+                                            <div class="history-details-cell">
+                                                <div class="history-details-label">Vendor ID</div>
+                                                <div class="history-details-value">{{ entry.vendor_id or '-' }}</div>
+                                            </div>
+                                            <div class="history-details-cell">
+                                                <div class="history-details-label">Booking ID</div>
+                                                <div class="history-details-value">{{ entry.booking_id or '-' }}</div>
+                                            </div>
+                                            <div class="history-details-cell">
+                                                <div class="history-details-label">Generators</div>
+                                                <div class="history-details-value">{{ entry.generators_summary or '-' }}</div>
+                                            </div>
+                                        </div>
+
+                                        {% if entry.items_structured %}
+                                        <ul class="history-item-list">
+                                            {% for item in entry.items_structured %}
+                                            <li>
+                                                <span>{{ item.label }}</span>
+                                                <span class="text-slate-500">{{ item.date }}</span>
+                                            </li>
+                                            {% endfor %}
+                                        </ul>
+                                        {% else %}
+                                        <div class="px-3 py-2 text-xs text-slate-500">No parsed generator items available.</div>
+                                        {% endif %}
+
+                                        <pre class="history-raw">{{ entry.details_raw or '-' }}</pre>
+                                    </div>
+                                </div>
+                            </article>
+                            {% endfor %}
                         </div>
-                    </article>
+                    </section>
                     {% endfor %}
                 </div>
-            </section>
-            {% endfor %}
-        </div>
 
-        <div id="historyFilteredEmpty" class="history-toolbar mt-6 hidden px-5 py-8 text-center text-sm text-slate-500">
-            No history events match the current search/filter.
+                <div id="historyFilteredEmpty" class="history-toolbar m-4 hidden px-5 py-8 text-center text-sm text-slate-500">
+                    No history events match the current search/filter.
+                </div>
+            </div>
         </div>
         {% else %}
         <div class="history-toolbar mt-6 px-5 py-8 text-sm text-slate-600">
