@@ -23,6 +23,7 @@ except ImportError:  # pragma: no cover - handled at runtime
 
 from core import (
     Generator,
+    Vendor,
     DatabaseManager,
     BookingService,
     DataLoader,
@@ -94,6 +95,12 @@ class CreateBookingRequest(BaseModel):
 
 class CreateVendorRequest(BaseModel):
     vendor_id: Optional[str] = None
+    vendor_name: str
+    vendor_place: str = "Civil Line"
+    phone: str = ""
+
+
+class UpdateVendorRequest(BaseModel):
     vendor_name: str
     vendor_place: str = "Civil Line"
     phone: str = ""
@@ -2322,6 +2329,123 @@ async def api_create_vendor(
         error_msg = str(e)
         logger.error(f"Error creating vendor: {error_msg}", exc_info=True)
         raise HTTPException(status_code=500, detail=error_msg)
+
+
+@app.patch("/api/vendors/{vendor_id}")
+async def api_update_vendor(
+    vendor_id: str,
+    request_data: UpdateVendorRequest,
+    _: Any = Depends(require_role(ROLE_ADMIN)),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Update vendor profile details."""
+    try:
+        vendor_repo = VendorRepository(conn)
+        existing_vendor = vendor_repo.get_by_id(vendor_id)
+        if not existing_vendor:
+            logger.warning(
+                f"Vendor update failed | context={{'vendor_id': '{vendor_id}', 'reason': 'not found'}}"
+            )
+            raise HTTPException(status_code=404, detail="Vendor not found")
+
+        vendor_name = request_data.vendor_name.strip() if request_data.vendor_name else ""
+        vendor_place = (
+            request_data.vendor_place.strip() if request_data.vendor_place else ""
+        ).strip() or "Civil Line"
+        phone = request_data.phone.strip() if request_data.phone else ""
+
+        if not vendor_name:
+            raise HTTPException(status_code=400, detail="Vendor Name is required")
+
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT vendor_id
+            FROM vendors
+            WHERE LOWER(vendor_name) = LOWER(?)
+              AND vendor_id <> ?
+            """,
+            (vendor_name, vendor_id),
+        )
+        duplicate = cur.fetchone()
+        if duplicate:
+            logger.warning(
+                "Vendor update failed | context="
+                f"{{'vendor_id': '{vendor_id}', 'reason': 'duplicate name', 'duplicate_vendor_id': '{duplicate[0]}'}}"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Vendor name '{vendor_name}' already exists with ID '{duplicate[0]}'",
+            )
+
+        vendor_repo.save(
+            Vendor(
+                vendor_id=vendor_id,
+                vendor_name=vendor_name,
+                vendor_place=vendor_place,
+                phone=phone,
+            )
+        )
+        logger.info(f"Vendor updated successfully | context={{'vendor_id': '{vendor_id}'}}")
+        return {
+            "success": True,
+            "message": f"Vendor {vendor_id} updated successfully",
+            "vendor": {
+                "id": vendor_id,
+                "name": vendor_name,
+                "place": vendor_place,
+                "phone": phone,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating vendor: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/vendors/{vendor_id}")
+async def api_delete_vendor(
+    vendor_id: str,
+    _: Any = Depends(require_role(ROLE_ADMIN)),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Delete a vendor when it is not referenced by any booking."""
+    try:
+        vendor_repo = VendorRepository(conn)
+        vendor = vendor_repo.get_by_id(vendor_id)
+        if not vendor:
+            logger.warning(
+                f"Vendor delete failed | context={{'vendor_id': '{vendor_id}', 'reason': 'not found'}}"
+            )
+            raise HTTPException(status_code=404, detail="Vendor not found")
+
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM bookings WHERE vendor_id = ?", (vendor_id,))
+        row = cur.fetchone()
+        booking_count = int(row[0]) if row and row[0] is not None else 0
+
+        if booking_count > 0:
+            logger.warning(
+                "Vendor delete blocked | context="
+                f"{{'vendor_id': '{vendor_id}', 'reason': 'bookings exist', 'booking_count': {booking_count}}}"
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Cannot delete vendor '{vendor_id}' because {booking_count} booking(s) reference it."
+                ),
+            )
+
+        cur.execute("DELETE FROM vendors WHERE vendor_id = ?", (vendor_id,))
+        conn.commit()
+        logger.info(f"Vendor deleted successfully | context={{'vendor_id': '{vendor_id}'}}")
+        return {"success": True, "message": f"Vendor {vendor_id} deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting vendor: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/bookings")
