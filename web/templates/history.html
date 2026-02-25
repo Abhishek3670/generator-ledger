@@ -1,71 +1,431 @@
 {% extends "base.html" %}
 
+{% block head %}
+<style>
+    .history-shell {
+        background: linear-gradient(180deg, #f8fafc 0%, #ffffff 45%, #f8fafc 100%);
+    }
+    .history-toolbar {
+        border: 1px solid #e2e8f0;
+        border-radius: 1rem;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    .history-chip {
+        border: 1px solid #e2e8f0;
+        border-radius: 9999px;
+        padding: 0.4rem 0.75rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #475569;
+        background: #ffffff;
+        transition: all 0.15s ease;
+    }
+    .history-chip:hover {
+        border-color: #cbd5e1;
+        color: #0f172a;
+    }
+    .history-chip-active {
+        background: #0f172a;
+        color: #ffffff;
+        border-color: #0f172a;
+    }
+    .history-column-head {
+        display: grid;
+        grid-template-columns: 70px minmax(0, 1fr) 180px;
+        gap: 0.75rem;
+        border: 1px solid #e2e8f0;
+        border-radius: 0.75rem;
+        padding: 0.65rem 0.9rem;
+        color: #64748b;
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        background: #f8fafc;
+    }
+    .history-group {
+        border: 1px solid #e2e8f0;
+        border-radius: 1rem;
+        background: #ffffff;
+        overflow: hidden;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    .history-group-head {
+        position: static;
+        border-bottom: 1px solid #e2e8f0;
+        background: #f8fafc;
+    }
+    .history-group-head h2 {
+        margin: 0;
+    }
+    .history-entry {
+        display: grid;
+        grid-template-columns: 70px minmax(0, 1fr);
+        gap: 0.75rem;
+        padding: 0.95rem 0.9rem;
+        border-bottom: 1px solid #f1f5f9;
+    }
+    .history-entry:last-child {
+        border-bottom: 0;
+    }
+    .history-lane {
+        position: relative;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        min-height: 100%;
+    }
+    .history-lane-line {
+        position: absolute;
+        top: 0;
+        bottom: -1.5rem;
+        width: 2px;
+        background: #cbd5e1;
+    }
+    .history-entry.is-last .history-lane-line {
+        display: none;
+    }
+    .history-node {
+        position: relative;
+        z-index: 1;
+        width: 0.85rem;
+        height: 0.85rem;
+        margin-top: 0.2rem;
+        border-radius: 9999px;
+        border: 2px solid #ffffff;
+        box-shadow: 0 0 0 1px #cbd5e1;
+        background: #94a3b8;
+    }
+    .history-node-added { background: #10b981; box-shadow: 0 0 0 1px #34d399; }
+    .history-node-updated { background: #f59e0b; box-shadow: 0 0 0 1px #fbbf24; }
+    .history-node-cancelled { background: #f97316; box-shadow: 0 0 0 1px #fb923c; }
+    .history-node-removed { background: #ef4444; box-shadow: 0 0 0 1px #f87171; }
+    .history-node-other { background: #64748b; box-shadow: 0 0 0 1px #94a3b8; }
+
+    .history-card-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.75rem;
+    }
+    .history-summary {
+        font-size: 0.96rem;
+        font-weight: 600;
+        color: #0f172a;
+        line-height: 1.4;
+    }
+    .history-tag {
+        border-radius: 9999px;
+        padding: 0.18rem 0.55rem;
+        font-size: 0.66rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+    .history-tag-added { background: #d1fae5; color: #047857; }
+    .history-tag-updated { background: #fef3c7; color: #b45309; }
+    .history-tag-cancelled { background: #ffedd5; color: #c2410c; }
+    .history-tag-removed { background: #fee2e2; color: #b91c1c; }
+    .history-tag-other { background: #e2e8f0; color: #334155; }
+    .history-hash {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 0.72rem;
+        color: #334155;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 0.45rem;
+        padding: 0.16rem 0.38rem;
+    }
+    .history-meta {
+        margin-top: 0.45rem;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+        color: #64748b;
+        font-size: 0.76rem;
+    }
+    .history-meta-sep {
+        color: #cbd5e1;
+    }
+    .history-view-link {
+        color: #0369a1;
+        font-weight: 600;
+        text-decoration: none;
+    }
+    .history-view-link:hover {
+        color: #075985;
+        text-decoration: underline;
+    }
+    .history-toggle {
+        margin-top: 0.55rem;
+        border: 0;
+        background: transparent;
+        color: #0f172a;
+        font-size: 0.75rem;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 0;
+    }
+    .history-toggle:hover {
+        color: #0369a1;
+    }
+    .history-details {
+        margin-top: 0.75rem;
+        border: 1px solid #e2e8f0;
+        border-radius: 0.75rem;
+        background: #f8fafc;
+        overflow: hidden;
+    }
+    .history-details-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0;
+    }
+    .history-details-cell {
+        padding: 0.65rem 0.75rem;
+        border-right: 1px solid #e2e8f0;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    .history-details-cell:nth-child(3n) {
+        border-right: 0;
+    }
+    .history-details-label {
+        font-size: 0.66rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #64748b;
+        font-weight: 700;
+    }
+    .history-details-value {
+        margin-top: 0.2rem;
+        font-size: 0.78rem;
+        color: #0f172a;
+        word-break: break-word;
+    }
+    .history-item-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+    .history-item-list li {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.5rem;
+        padding: 0.55rem 0.75rem;
+        border-bottom: 1px dashed #e2e8f0;
+        font-size: 0.78rem;
+        color: #334155;
+    }
+    .history-item-list li:last-child {
+        border-bottom: 0;
+    }
+    .history-raw {
+        margin: 0;
+        padding: 0.75rem;
+        font-size: 0.73rem;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #334155;
+        background: #ffffff;
+        border-top: 1px solid #e2e8f0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+    .hidden {
+        display: none !important;
+    }
+    @media (max-width: 1024px) {
+        .history-column-head {
+            grid-template-columns: 48px minmax(0, 1fr);
+        }
+    }
+    @media (max-width: 768px) {
+        .history-column-head {
+            grid-template-columns: 1fr;
+        }
+        .history-entry {
+            grid-template-columns: 1fr;
+            gap: 0.5rem;
+        }
+        .history-lane {
+            display: none;
+        }
+        .history-details-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .history-details-cell:nth-child(3n) {
+            border-right: 1px solid #e2e8f0;
+        }
+        .history-details-cell:nth-child(2n) {
+            border-right: 0;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100">
+<div class="history-shell min-h-screen">
     <div class="mx-auto max-w-6xl px-4 py-10 lg:py-12" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
         <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
                 <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">History</div>
-                <h1 class="mt-2 text-2xl font-semibold text-slate-900">Booking Activity</h1>
-                <p class="mt-1 text-sm text-slate-500">Audit log of booking actions and changes.</p>
+                <h1 class="mt-2 text-2xl font-semibold text-slate-900">Booking Activity Graph</h1>
+                <p class="mt-1 text-sm text-slate-500">GitLens-style event stream for booking changes and audit activity.</p>
+            </div>
+            <div class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                {{ history_total_count or 0 }} event{{ '' if (history_total_count or 0) == 1 else 's' }}
             </div>
         </div>
 
-        {% if events %}
-        <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <input
-                type="text"
-                id="historyFilter"
-                placeholder="Search by booking, vendor, event, or detail"
-                class="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
-            >
+        {% if history_groups and history_total_count %}
+        <div class="history-toolbar mt-6 p-4">
+            <div class="grid gap-4">
+                <input
+                    id="historySearch"
+                    type="text"
+                    placeholder="Search summary, event type, user, vendor, booking, generator, or details..."
+                    class="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                >
+                <div id="historyChips" class="flex flex-wrap gap-2">
+                    {% for chip in history_filter_chips %}
+                    <button
+                        type="button"
+                        class="history-chip{% if chip.key == 'all' %} history-chip-active{% endif %}"
+                        data-history-chip="{{ chip.key }}"
+                    >
+                        {{ chip.label }} ({{ chip.count }})
+                    </button>
+                    {% endfor %}
+                </div>
+            </div>
         </div>
 
-        <div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div class="overflow-x-auto">
-                <table class="min-w-[1100px] w-full text-sm">
-                    <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                        <tr>
-                            <th class="w-40 px-6 py-4 text-left font-semibold">Time</th>
-                            <th class="w-40 px-6 py-4 text-center font-semibold">Event</th>
-                            <th class="w-32 px-6 py-4 text-left font-semibold">User</th>
-                            <th class="px-6 py-4 text-left font-semibold">Vendor</th>
-                            <th class="w-56 px-6 py-4 text-left font-semibold">Generators</th>
-                            <th class="px-6 py-4 text-left font-semibold">Summary</th>
-                            <th class="px-6 py-4 text-left font-semibold">Details</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-100 text-slate-700" id="historyTable">
-                        {% for event in events %}
-                        <tr class="transition hover:bg-slate-50">
-                            <td class="w-40 px-6 py-4 text-xs text-slate-500">{{ event.event_time }}</td>
-                            <td class="w-40 px-6 py-4 text-center">
-                                <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold
-                                    {% if event.event_type in ['booking_created', 'booking_merged', 'booking_item_added'] %}
-                                    bg-emerald-100 text-emerald-700
-                                    {% elif event.event_type in ['booking_deleted', 'booking_cancelled'] %}
-                                    bg-rose-100 text-rose-700
-                                    {% elif event.event_type in ['booking_items_updated', 'booking_times_modified'] %}
-                                    bg-amber-100 text-amber-700
-                                    {% else %}
-                                    bg-slate-100 text-slate-700
-                                    {% endif %}">
-                                    {{ event.event_type.replace('_', ' ') | title }}
-                                </span>
-                            </td>
-                            <td class="px-6 py-4 text-xs text-slate-500">{{ event.user or '-' }}</td>
-                            <td class="px-6 py-4 font-semibold text-slate-900">{{ event.vendor_name or '-' }}</td>
-                            <td class="w-56 px-6 py-4 whitespace-pre-line">{{ event.generators or '-' }}</td>
-                            <td class="px-6 py-4">{{ event.summary or '-' }}</td>
-                            <td class="px-6 py-4 text-xs text-slate-500 whitespace-pre-line">{{ event.details_display or '-' }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+        <div class="history-column-head mt-6">
+            <span>Graph</span>
+            <span>Commit Message</span>
+            <span class="hidden lg:block">Author / Meta</span>
+        </div>
+
+        <div id="historyGroups" class="mt-4 space-y-5">
+            {% for group in history_groups %}
+            <section class="history-group" data-history-group>
+                <div class="history-group-head px-4 py-3">
+                    <div class="flex items-center justify-between gap-3">
+                        <h2 class="text-sm font-semibold text-slate-900">{{ group.date_label }}</h2>
+                        <span class="text-xs text-slate-500">{{ group.entries|length }} event{{ '' if group.entries|length == 1 else 's' }}</span>
+                    </div>
+                </div>
+                <div>
+                    {% for entry in group.entries %}
+                    <article
+                        class="history-entry{% if loop.last %} is-last{% endif %}"
+                        data-history-entry
+                        data-history-category="{{ entry.event_category }}"
+                        data-history-search="{{ entry.search_blob }}"
+                    >
+                        <div class="history-lane" aria-hidden="true">
+                            <span class="history-lane-line"></span>
+                            <span class="history-node history-node-{{ entry.event_category }}"></span>
+                        </div>
+
+                        <div>
+                            <div class="history-card-head">
+                                <div class="history-summary">{{ entry.summary }}</div>
+                                <div class="flex items-center gap-2">
+                                    <span class="history-tag history-tag-{{ entry.event_category }}">{{ entry.event_action_label }}</span>
+                                    <code class="history-hash">{{ entry.short_hash }}</code>
+                                </div>
+                            </div>
+
+                            <div class="history-meta">
+                                <span>{{ entry.user or '-' }}</span>
+                                <span class="history-meta-sep">•</span>
+                                <span>{{ entry.vendor_name or '-' }}</span>
+                                {% if entry.booking_id %}
+                                <span class="history-meta-sep">•</span>
+                                <span class="font-semibold text-slate-700">{{ entry.booking_id }}</span>
+                                {% endif %}
+                                <span class="history-meta-sep">•</span>
+                                <span
+                                    class="js-relative-time"
+                                    data-time-iso="{{ entry.event_time_iso }}"
+                                    data-time-raw="{{ entry.event_time_raw }}"
+                                    title="{{ entry.event_time_raw }}"
+                                >{{ entry.event_time_raw }}</span>
+                                {% if entry.view_link %}
+                                <span class="history-meta-sep">•</span>
+                                <a href="{{ entry.view_link }}" class="history-view-link">View</a>
+                                {% endif %}
+                            </div>
+
+                            <button
+                                type="button"
+                                class="history-toggle"
+                                data-history-toggle
+                                data-history-target="history-details-{{ group.date_key }}-{{ loop.index0 }}"
+                            >
+                                Show details
+                            </button>
+
+                            <div id="history-details-{{ group.date_key }}-{{ loop.index0 }}" class="history-details hidden" data-history-details>
+                                <div class="history-details-grid">
+                                    <div class="history-details-cell">
+                                        <div class="history-details-label">Event Type</div>
+                                        <div class="history-details-value">{{ entry.event_type or '-' }}</div>
+                                    </div>
+                                    <div class="history-details-cell">
+                                        <div class="history-details-label">User</div>
+                                        <div class="history-details-value">{{ entry.user or '-' }}</div>
+                                    </div>
+                                    <div class="history-details-cell">
+                                        <div class="history-details-label">Vendor</div>
+                                        <div class="history-details-value">{{ entry.vendor_name or '-' }}</div>
+                                    </div>
+                                    <div class="history-details-cell">
+                                        <div class="history-details-label">Vendor ID</div>
+                                        <div class="history-details-value">{{ entry.vendor_id or '-' }}</div>
+                                    </div>
+                                    <div class="history-details-cell">
+                                        <div class="history-details-label">Booking ID</div>
+                                        <div class="history-details-value">{{ entry.booking_id or '-' }}</div>
+                                    </div>
+                                    <div class="history-details-cell">
+                                        <div class="history-details-label">Generators</div>
+                                        <div class="history-details-value">{{ entry.generators_summary or '-' }}</div>
+                                    </div>
+                                </div>
+
+                                {% if entry.items_structured %}
+                                <ul class="history-item-list">
+                                    {% for item in entry.items_structured %}
+                                    <li>
+                                        <span>{{ item.label }}</span>
+                                        <span class="text-slate-500">{{ item.date }}</span>
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                                {% else %}
+                                <div class="px-3 py-2 text-xs text-slate-500">No parsed generator items available.</div>
+                                {% endif %}
+
+                                <pre class="history-raw">{{ entry.details_raw or '-' }}</pre>
+                            </div>
+                        </div>
+                    </article>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endfor %}
+        </div>
+
+        <div id="historyFilteredEmpty" class="history-toolbar mt-6 hidden px-5 py-8 text-center text-sm text-slate-500">
+            No history events match the current search/filter.
         </div>
         {% else %}
-        <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
+        <div class="history-toolbar mt-6 px-5 py-8 text-sm text-slate-600">
             No history yet. Create or update bookings to see activity here.
         </div>
         {% endif %}
@@ -73,16 +433,121 @@
 </div>
 
 <script>
-document.getElementById('historyFilter')?.addEventListener('keyup', function() {
-    const filter = this.value.toUpperCase();
-    const tableBody = document.getElementById('historyTable');
-    if (!tableBody) return;
-    const rows = tableBody.getElementsByTagName('tr');
+(() => {
+    const searchInput = document.getElementById('historySearch');
+    const chipButtons = Array.from(document.querySelectorAll('[data-history-chip]'));
+    const entries = Array.from(document.querySelectorAll('[data-history-entry]'));
+    const groupNodes = Array.from(document.querySelectorAll('[data-history-group]'));
+    const emptyNode = document.getElementById('historyFilteredEmpty');
+    const detailsToggles = Array.from(document.querySelectorAll('[data-history-toggle]'));
+    const relativeNodes = Array.from(document.querySelectorAll('.js-relative-time'));
 
-    for (let i = 0; i < rows.length; i++) {
-        const text = rows[i].textContent.toUpperCase();
-        rows[i].style.display = text.includes(filter) ? '' : 'none';
+    if (!entries.length) {
+        return;
     }
-});
+
+    let activeCategory = 'all';
+
+    function formatRelativeTime(isoValue, rawValue) {
+        if (!isoValue) {
+            return rawValue || '-';
+        }
+
+        const target = new Date(isoValue);
+        if (Number.isNaN(target.getTime())) {
+            return rawValue || '-';
+        }
+
+        const now = new Date();
+        const deltaMs = now.getTime() - target.getTime();
+        const isPast = deltaMs >= 0;
+        const absSeconds = Math.floor(Math.abs(deltaMs) / 1000);
+
+        if (absSeconds < 10) return 'just now';
+        if (absSeconds < 60) return `${absSeconds}s ${isPast ? 'ago' : 'from now'}`;
+
+        const units = [
+            ['y', 31536000],
+            ['mo', 2592000],
+            ['d', 86400],
+            ['h', 3600],
+            ['m', 60],
+        ];
+
+        for (const [label, seconds] of units) {
+            if (absSeconds >= seconds) {
+                const value = Math.floor(absSeconds / seconds);
+                return `${value}${label} ${isPast ? 'ago' : 'from now'}`;
+            }
+        }
+
+        return rawValue || '-';
+    }
+
+    function renderRelativeTimes() {
+        relativeNodes.forEach((node) => {
+            const iso = node.getAttribute('data-time-iso') || '';
+            const raw = node.getAttribute('data-time-raw') || '';
+            const relative = formatRelativeTime(iso, raw);
+            node.textContent = relative;
+            node.title = raw || relative;
+        });
+    }
+
+    function applyFilters() {
+        const query = (searchInput?.value || '').trim().toLowerCase();
+        let visibleCount = 0;
+
+        entries.forEach((entry) => {
+            const category = entry.getAttribute('data-history-category') || 'other';
+            const searchBlob = entry.getAttribute('data-history-search') || '';
+            const categoryMatch = activeCategory === 'all' || category === activeCategory;
+            const queryMatch = !query || searchBlob.includes(query);
+            const isVisible = categoryMatch && queryMatch;
+
+            entry.style.display = isVisible ? '' : 'none';
+            if (isVisible) {
+                visibleCount += 1;
+            }
+        });
+
+        groupNodes.forEach((group) => {
+            const groupEntries = Array.from(group.querySelectorAll('[data-history-entry]'));
+            const hasVisible = groupEntries.some((entry) => entry.style.display !== 'none');
+            group.style.display = hasVisible ? '' : 'none';
+        });
+
+        if (emptyNode) {
+            emptyNode.classList.toggle('hidden', visibleCount !== 0);
+        }
+    }
+
+    chipButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+            activeCategory = button.getAttribute('data-history-chip') || 'all';
+            chipButtons.forEach((chip) => chip.classList.remove('history-chip-active'));
+            button.classList.add('history-chip-active');
+            applyFilters();
+        });
+    });
+
+    searchInput?.addEventListener('input', applyFilters);
+
+    detailsToggles.forEach((toggle) => {
+        toggle.addEventListener('click', () => {
+            const targetId = toggle.getAttribute('data-history-target');
+            if (!targetId) return;
+            const panel = document.getElementById(targetId);
+            if (!panel) return;
+            const opening = panel.classList.contains('hidden');
+            panel.classList.toggle('hidden', !opening);
+            toggle.textContent = opening ? 'Hide details' : 'Show details';
+        });
+    });
+
+    renderRelativeTimes();
+    window.setInterval(renderRelativeTimes, 60000);
+    applyFilters();
+})();
 </script>
 {% endblock %}

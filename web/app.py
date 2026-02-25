@@ -9,10 +9,11 @@ from fastapi.templating import Jinja2Templates
 from fastapi.exceptions import RequestValidationError
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 import logging
 import re
+import hashlib
 from pydantic import BaseModel
 import jwt
 try:
@@ -74,6 +75,7 @@ from config import (
     STATUS_CANCELLED,
     GEN_STATUS_ACTIVE,
     GEN_STATUS_INACTIVE,
+    DATETIME_FORMAT,
 )
 setup_logging()
 
@@ -141,6 +143,22 @@ MONITOR_MEMORY_CRITICAL_THRESHOLD = 90.0
 MONITOR_TEMP_HIGH_THRESHOLD = 75.0
 MONITOR_TEMP_CRITICAL_THRESHOLD = 85.0
 MONITOR_TEMP_PREFERRED_SENSORS = ("coretemp", "cpu_thermal", "k10temp")
+
+HISTORY_EVENT_CATEGORY_SETS = {
+    "added": {"booking_created", "booking_merged", "booking_item_added"},
+    "updated": {"booking_items_updated", "booking_times_modified"},
+    "cancelled": {"booking_cancelled"},
+    "removed": {"booking_deleted"},
+}
+HISTORY_EVENT_ACTION_LABELS = {
+    "booking_created": "Genset Added",
+    "booking_merged": "Genset Added",
+    "booking_item_added": "Genset Added",
+    "booking_items_updated": "Genset Updated",
+    "booking_times_modified": "Genset Updated",
+    "booking_cancelled": "Genset Cancelled",
+    "booking_deleted": "Genset Removed",
+}
 
 # Exception handler for validation errors
 @app.exception_handler(RequestValidationError)
@@ -1123,6 +1141,171 @@ async def billing_page(
         return templates.TemplateResponse("error.html", template_context(request, error=str(e)))
 
 
+def _history_event_category(event_type: str) -> str:
+    """Map history event type to GitLens-style category."""
+    for category, types in HISTORY_EVENT_CATEGORY_SETS.items():
+        if event_type in types:
+            return category
+    return "other"
+
+
+def _history_action_label(event_type: str) -> str:
+    """Human-readable action label for history event type."""
+    if event_type in HISTORY_EVENT_ACTION_LABELS:
+        return HISTORY_EVENT_ACTION_LABELS[event_type]
+    return event_type.replace("_", " ").title() if event_type else "Event"
+
+
+def _history_short_hash(
+    event_id: Optional[int],
+    event_time: str,
+    event_type: str,
+    booking_id: Optional[str]
+) -> str:
+    """Generate a stable 7-char pseudo hash for history entries."""
+    if isinstance(event_id, int):
+        return f"{event_id:07x}"[-7:]
+
+    seed = f"{event_time}|{event_type}|{booking_id or ''}"
+    return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:7]
+
+
+def _history_parse_time(event_time_raw: str) -> Tuple[Optional[datetime], str]:
+    """Parse history event time and return datetime + ISO-like value."""
+    if not event_time_raw:
+        return None, ""
+
+    candidate = event_time_raw.strip()
+    parse_formats = (
+        DATETIME_FORMAT,
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+    )
+    for fmt in parse_formats:
+        try:
+            dt = datetime.strptime(candidate, fmt)
+            return dt, dt.strftime("%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            continue
+
+    try:
+        normalized = candidate.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone().replace(tzinfo=None)
+        return dt, dt.strftime("%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return None, ""
+
+
+def _history_extract_generators(details: str) -> List[str]:
+    """Extract generator ids from free-form history details."""
+    if not details:
+        return []
+    match = re.search(r"generators=([^ ]+)", details)
+    if match:
+        raw = match.group(1)
+        return [part.strip() for part in raw.split(",") if part.strip()]
+    match = re.search(r"generator_id=([^ ]+)", details)
+    if match:
+        return [match.group(1).strip()]
+    return []
+
+
+def _history_extract_items(details: str) -> List[Dict[str, str]]:
+    """Extract generator/date tuples from history details."""
+    if not details:
+        return []
+    if "items=" in details:
+        items_part = details.split("items=", 1)[1].split(" ", 1)[0]
+        entries: List[Dict[str, str]] = []
+        for token in items_part.split(";"):
+            token = token.strip()
+            if not token:
+                continue
+            if "|" in token:
+                generator_id, date_part = token.split("|", 1)
+            else:
+                generator_id, date_part = token, ""
+            entries.append({
+                "generator_id": generator_id.strip(),
+                "date": date_part.strip(),
+            })
+        return entries
+    fallback = _history_extract_generators(details)
+    return [{"generator_id": gen_id, "date": ""} for gen_id in fallback]
+
+
+def _history_date_label(event_dt: Optional[datetime]) -> Tuple[str, str]:
+    """Return stable date key + display label for grouping."""
+    if not event_dt:
+        return "unknown", "Unknown Date"
+
+    event_date = event_dt.date()
+    today = date.today()
+    if event_date == today:
+        label = "Today"
+    elif event_date == today - timedelta(days=1):
+        label = "Yesterday"
+    else:
+        label = event_dt.strftime("%d %b %Y")
+
+    return event_date.isoformat(), label
+
+
+def _history_group_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Group history entries by date section while preserving order."""
+    groups: List[Dict[str, Any]] = []
+    group_map: Dict[str, Dict[str, Any]] = {}
+
+    for raw_entry in entries:
+        event_dt = raw_entry.get("_event_dt")
+        date_key, date_label = _history_date_label(event_dt)
+
+        if date_key not in group_map:
+            group = {
+                "date_key": date_key,
+                "date_label": date_label,
+                "entries": [],
+            }
+            group_map[date_key] = group
+            groups.append(group)
+
+        entry = dict(raw_entry)
+        entry.pop("_event_dt", None)
+        group_map[date_key]["entries"].append(entry)
+
+    return groups
+
+
+def _history_build_filter_chips(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Build filter chip metadata with category counts."""
+    categories = [
+        ("all", "All"),
+        ("added", "Added"),
+        ("updated", "Updated"),
+        ("cancelled", "Cancelled"),
+        ("removed", "Removed"),
+        ("other", "Other"),
+    ]
+
+    counts = {key: 0 for key, _label in categories}
+    counts["all"] = len(entries)
+    for entry in entries:
+        category = entry.get("event_category", "other")
+        if category in counts:
+            counts[category] += 1
+
+    chips = []
+    for key, label in categories:
+        chips.append({
+            "key": key,
+            "label": label,
+            "count": counts.get(key, 0),
+        })
+    return chips
+
+
 @app.get("/history", response_class=HTMLResponse)
 async def history_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     """Booking history page."""
@@ -1142,54 +1325,10 @@ async def history_page(request: Request, conn: sqlite3.Connection = Depends(get_
             generator_cache[generator_id] = capacity
             return capacity
 
-        def extract_generators(details: str) -> List[str]:
-            if not details:
-                return []
-            match = re.search(r"generators=([^ ]+)", details)
-            if match:
-                raw = match.group(1)
-                return [part.strip() for part in raw.split(",") if part.strip()]
-            match = re.search(r"generator_id=([^ ]+)", details)
-            if match:
-                return [match.group(1).strip()]
-            return []
-
-        def extract_items(details: str) -> List[Dict[str, str]]:
-            if not details:
-                return []
-            if "items=" in details:
-                items_part = details.split("items=", 1)[1].split(" ", 1)[0]
-                entries = []
-                for token in items_part.split(";"):
-                    token = token.strip()
-                    if not token:
-                        continue
-                    if "|" in token:
-                        generator_id, date_part = token.split("|", 1)
-                    else:
-                        generator_id, date_part = token, ""
-                    entries.append({
-                        "generator_id": generator_id.strip(),
-                        "date": date_part.strip()
-                    })
-                return entries
-            fallback = extract_generators(details)
-            return [{"generator_id": gen_id, "date": ""} for gen_id in fallback]
-
-        event_action_labels = {
-            "booking_created": "Genset Added",
-            "booking_merged": "Genset Added",
-            "booking_item_added": "Genset Added",
-            "booking_items_updated": "Genset Updated",
-            "booking_times_modified": "Genset Updated",
-            "booking_cancelled": "Genset Cancelled",
-            "booking_deleted": "Genset Removed",
-        }
-
-        history_rows = []
+        history_entries: List[Dict[str, Any]] = []
         for event in events:
             vendor_name = "-"
-            vendor_id = event.vendor_id
+            vendor_id = event.vendor_id or ""
             if vendor_id:
                 vendor = vendor_repo.get_by_id(vendor_id)
                 vendor_name = vendor.vendor_name if vendor else vendor_id
@@ -1198,8 +1337,10 @@ async def history_page(request: Request, conn: sqlite3.Connection = Depends(get_
                 if booking:
                     vendor = vendor_repo.get_by_id(booking.vendor_id)
                     vendor_name = vendor.vendor_name if vendor else booking.vendor_id
+                    vendor_id = booking.vendor_id or ""
 
-            items = extract_items(event.details)
+            details_raw = event.details or ""
+            items = _history_extract_items(details_raw)
             if not items and event.booking_id:
                 booking_items = booking_repo.get_items(event.booking_id)
                 items = [{
@@ -1207,40 +1348,80 @@ async def history_page(request: Request, conn: sqlite3.Connection = Depends(get_
                     "date": item.start_dt.split()[0] if item.start_dt else ""
                 } for item in booking_items]
 
-            generator_ids = [item["generator_id"] for item in items if item.get("generator_id")]
-            generator_summary = "\n".join(sorted(set(generator_ids))) if generator_ids else "-"
-
-            formatted_entries = []
+            items_structured = []
             for item in items:
                 generator_id = item.get("generator_id")
                 if not generator_id:
                     continue
                 capacity = get_capacity(generator_id)
-                capacity_label = f" ({capacity}kVA)" if capacity else ""
+                capacity_label = f" ({capacity} kVA)" if capacity else ""
                 date_label = item.get("date") or "-"
-                formatted_entries.append(f"{generator_id}{capacity_label} [{date_label}]")
+                items_structured.append({
+                    "generator_id": generator_id,
+                    "capacity_kva": capacity,
+                    "date": date_label,
+                    "label": f"{generator_id}{capacity_label}",
+                })
 
-            genset_count = len(formatted_entries)
-            generator_list_display = "\n".join(formatted_entries) if formatted_entries else "-"
-            action_label = event_action_labels.get(event.event_type, "Genset Updated")
-            details_display = (
-                f"{action_label} = {genset_count}\n"
-                f"Generator(s) = {generator_list_display}\n"
-                f"Vendor = {vendor_name}"
+            event_type = event.event_type or ""
+            event_action_label = _history_action_label(event_type)
+            event_category = _history_event_category(event_type)
+            event_time_raw = event.event_time or ""
+            event_dt, event_time_iso = _history_parse_time(event_time_raw)
+            short_hash = _history_short_hash(
+                event.id,
+                event_time_raw,
+                event_type,
+                event.booking_id,
             )
-            history_rows.append({
-                "event_time": event.event_time,
-                "event_type": event.event_type,
+            summary = (event.summary or "").strip() or event_action_label
+            booking_id = event.booking_id or ""
+            generators_summary = ", ".join(
+                sorted({item["generator_id"] for item in items_structured})
+            ) if items_structured else "-"
+            view_link = f"/booking/{booking_id}" if booking_id else None
+
+            search_blob = " ".join(filter(None, [
+                summary,
+                event_action_label,
+                event_type,
+                vendor_name,
+                vendor_id,
+                booking_id,
+                event.user or "",
+                details_raw,
+                generators_summary,
+            ])).lower()
+
+            history_entries.append({
+                "event_id": event.id,
+                "short_hash": short_hash,
+                "event_type": event_type,
+                "event_category": event_category,
+                "event_action_label": event_action_label,
+                "event_time_raw": event_time_raw,
+                "event_time_iso": event_time_iso,
                 "user": event.user or "-",
                 "vendor_name": vendor_name,
-                "generators": generator_summary,
-                "summary": event.summary or "",
-                "details_display": details_display
+                "vendor_id": vendor_id,
+                "booking_id": booking_id,
+                "summary": summary,
+                "details_raw": details_raw,
+                "generators_summary": generators_summary,
+                "items_structured": items_structured,
+                "view_link": view_link,
+                "search_blob": search_blob,
+                "_event_dt": event_dt,
             })
+
+        history_groups = _history_group_entries(history_entries)
+        history_filter_chips = _history_build_filter_chips(history_entries)
 
         return templates.TemplateResponse("history.html", template_context(
             request,
-            events=history_rows
+            history_groups=history_groups,
+            history_filter_chips=history_filter_chips,
+            history_total_count=len(history_entries),
         ))
     except Exception as e:
         logger.error(f"Error loading history page: {e}", exc_info=True)
