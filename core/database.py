@@ -7,6 +7,7 @@ import logging
 from typing import Optional
 
 from config import STATUS_CONFIRMED, GEN_STATUS_ACTIVE, OWNER_USERNAME
+from .observability import connect_sqlite
 
 
 class DatabaseManager:
@@ -20,9 +21,8 @@ class DatabaseManager:
     def connect(self) -> sqlite3.Connection:
         """Create and return a database connection."""
         try:
-            self.conn = sqlite3.connect(
+            self.conn = connect_sqlite(
                 self.db_path,
-                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
             )
             self.conn.execute("PRAGMA foreign_keys = ON")
             self.logger.info(f"Database connected | context={{'db_path': '{self.db_path}'}}")

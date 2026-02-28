@@ -10,6 +10,7 @@ from fastapi.exceptions import RequestValidationError
 import os
 import json
 import sqlite3
+import time
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 import logging
@@ -37,6 +38,12 @@ from core import (
     UserRepository,
 )
 from core.repositories import SessionRepository, RevokedTokenRepository
+from core.observability import (
+    begin_request_observation,
+    connect_sqlite,
+    end_request_observation,
+    get_request_db_metrics,
+)
 from core.utils import transaction
 from core.validation import ensure_booking
 from core.services import create_vendor, archive_all_bookings, log_booking_history, encode_history_items
@@ -486,6 +493,16 @@ def is_api_request(request: Request) -> bool:
     return False
 
 
+def query_param(request: Request, key: str, default: Optional[str] = None) -> Optional[str]:
+    """
+    Safe query param getter for direct function calls in tests.
+    """
+    try:
+        return request.query_params.get(key, default)
+    except KeyError:
+        return default
+
+
 def unauthorized_response(request: Request, detail: str = "Unauthorized") -> JSONResponse | RedirectResponse:
     if is_api_request(request):
         return JSONResponse(status_code=401, content={"detail": detail})
@@ -643,10 +660,7 @@ async def get_db(request: Request):
 
     conn = None
     try:
-        conn = sqlite3.connect(
-            DB_PATH,
-            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
-        )
+        conn = connect_sqlite(DB_PATH)
         conn.execute("PRAGMA foreign_keys = ON")
         yield conn
     except sqlite3.Error as e:
@@ -683,110 +697,175 @@ def get_actor(request: Request) -> str:
     return "unknown"
 
 
+def _new_db_connection() -> sqlite3.Connection:
+    conn = connect_sqlite(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def _initialize_auth_state(request: Request) -> None:
+    request.state.user = None
+    request.state.auth_type = None
+    request.state.csrf_token = None
+    request.state.session_id = None
+    request.state.token_jti = None
+
+
+def _apply_auth_state(request: Request, state: Dict[str, Any]) -> None:
+    request.state.user = state.get("user")
+    request.state.auth_type = state.get("auth_type")
+    request.state.csrf_token = state.get("csrf_token")
+    request.state.session_id = state.get("session_id")
+    request.state.token_jti = state.get("token_jti")
+
+
+def _delete_session_cookie(response: Any) -> None:
+    if hasattr(response, "delete_cookie"):
+        response.delete_cookie(
+            SESSION_COOKIE_NAME,
+            path="/",
+            samesite="lax",
+            secure=not DEBUG,
+            httponly=True,
+        )
+
+
+def _authenticate_with_bearer_token(
+    request: Request,
+    conn: sqlite3.Connection
+) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse | RedirectResponse]]:
+    auth_header = request.headers.get("authorization")
+    if not auth_header:
+        return None, None
+
+    token = get_bearer_token(request)
+    if not token:
+        return None, unauthorized_response(request)
+
+    try:
+        payload = decode_access_token(token, JWT_SECRET, JWT_ALGORITHM, verify_exp=True)
+    except jwt.ExpiredSignatureError:
+        return None, unauthorized_response(request, detail="Token expired")
+    except jwt.PyJWTError:
+        return None, unauthorized_response(request, detail="Invalid token")
+
+    jti = payload.get("jti")
+    if not jti:
+        return None, unauthorized_response(request, detail="Invalid token")
+
+    revoked_repo = RevokedTokenRepository(conn)
+    if revoked_repo.is_revoked(jti, now_ts()):
+        return None, unauthorized_response(request, detail="Token revoked")
+
+    user_id_raw = payload.get("sub")
+    try:
+        user_id = int(user_id_raw)
+    except (TypeError, ValueError):
+        return None, unauthorized_response(request, detail="Invalid token")
+
+    user_repo = UserRepository(conn)
+    user = user_repo.get_by_id(user_id)
+    if not user or not user.is_active:
+        return None, unauthorized_response(request, detail="Unauthorized")
+
+    return {
+        "user": user,
+        "auth_type": "jwt",
+        "token_jti": jti,
+    }, None
+
+
+def _authenticate_with_session_cookie(
+    request: Request,
+    conn: sqlite3.Connection
+) -> Tuple[Dict[str, Any], bool]:
+    session_id = request.cookies.get(SESSION_COOKIE_NAME)
+    if not session_id:
+        return {}, False
+
+    clear_cookie = False
+    session_repo = SessionRepository(conn)
+    session = session_repo.get_by_id(session_id)
+    if not session or session.expires_at <= now_ts():
+        if session:
+            session_repo.delete(session_id)
+        clear_cookie = True
+        return {}, clear_cookie
+
+    user_repo = UserRepository(conn)
+    user = user_repo.get_by_id(int(session.user_id))
+    if not user or not user.is_active:
+        session_repo.delete(session_id)
+        clear_cookie = True
+        return {}, clear_cookie
+
+    session_repo.update_last_seen(session.session_id, now_ts())
+    return {
+        "user": user,
+        "auth_type": "session",
+        "csrf_token": session.csrf_token,
+        "session_id": session.session_id,
+    }, clear_cookie
+
+
 @app.middleware("http")
 async def db_auth_middleware(request: Request, call_next):
     """Attach DB connection and enforce authentication for protected routes."""
     conn: Optional[sqlite3.Connection] = None
+    response: Optional[JSONResponse | RedirectResponse | HTMLResponse] = None
     clear_cookie = False
+    path = request.url.path
+    request_started = time.perf_counter()
+    observation_tokens = begin_request_observation(f"{request.method} {path}")
     try:
-        conn = sqlite3.connect(
-            DB_PATH,
-            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
-        )
-        conn.execute("PRAGMA foreign_keys = ON")
+        conn = _new_db_connection()
         request.state.db = conn
-        request.state.user = None
-        request.state.auth_type = None
-        request.state.csrf_token = None
-        request.state.session_id = None
+        _initialize_auth_state(request)
 
-        path = request.url.path
         is_public = path in PUBLIC_PATHS or any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES)
 
-        auth_header = request.headers.get("authorization")
-        if auth_header:
-            token = get_bearer_token(request)
-            if not token:
-                return unauthorized_response(request)
-            try:
-                payload = decode_access_token(token, JWT_SECRET, JWT_ALGORITHM, verify_exp=True)
-            except jwt.ExpiredSignatureError:
-                return unauthorized_response(request, detail="Token expired")
-            except jwt.PyJWTError:
-                return unauthorized_response(request, detail="Invalid token")
+        jwt_auth_state, auth_error = _authenticate_with_bearer_token(request, conn)
+        if auth_error:
+            response = auth_error
+            return response
 
-            jti = payload.get("jti")
-            if not jti:
-                return unauthorized_response(request, detail="Invalid token")
-
-            revoked_repo = RevokedTokenRepository(conn)
-            if revoked_repo.is_revoked(jti, now_ts()):
-                return unauthorized_response(request, detail="Token revoked")
-
-            user_id_raw = payload.get("sub")
-            try:
-                user_id = int(user_id_raw)
-            except (TypeError, ValueError):
-                return unauthorized_response(request, detail="Invalid token")
-
-            user_repo = UserRepository(conn)
-            user = user_repo.get_by_id(user_id)
-            if not user or not user.is_active:
-                return unauthorized_response(request, detail="Unauthorized")
-
-            request.state.user = user
-            request.state.auth_type = "jwt"
-            request.state.token_jti = jti
+        if jwt_auth_state:
+            _apply_auth_state(request, jwt_auth_state)
         else:
-            session_id = request.cookies.get(SESSION_COOKIE_NAME)
-            if session_id:
-                session_repo = SessionRepository(conn)
-                session = session_repo.get_by_id(session_id)
-                if not session or session.expires_at <= now_ts():
-                    if session:
-                        session_repo.delete(session_id)
-                    clear_cookie = True
-                else:
-                    user_repo = UserRepository(conn)
-                    user = user_repo.get_by_id(int(session.user_id))
-                    if not user or not user.is_active:
-                        session_repo.delete(session_id)
-                        clear_cookie = True
-                    else:
-                        request.state.user = user
-                        request.state.auth_type = "session"
-                        request.state.csrf_token = session.csrf_token
-                        request.state.session_id = session.session_id
-                        session_repo.update_last_seen(session.session_id, now_ts())
+            session_auth_state, clear_cookie = _authenticate_with_session_cookie(request, conn)
+            _apply_auth_state(request, session_auth_state)
 
         if request.state.user and request.state.auth_type == "session":
             if requires_csrf(request) and path not in CSRF_EXEMPT_PATHS:
                 if not await validate_csrf(request, request.state.csrf_token):
-                    return forbidden_response(request, detail="Invalid CSRF token")
+                    response = forbidden_response(request, detail="Invalid CSRF token")
+                    return response
 
         if not request.state.user and not is_public:
             response = unauthorized_response(request)
-            if clear_cookie and hasattr(response, "delete_cookie"):
-                response.delete_cookie(
-                    SESSION_COOKIE_NAME,
-                    path="/",
-                    samesite="lax",
-                    secure=not DEBUG,
-                    httponly=True,
-                )
+            if clear_cookie:
+                _delete_session_cookie(response)
             return response
 
         response = await call_next(request)
-        if clear_cookie and hasattr(response, "delete_cookie"):
-            response.delete_cookie(
-                SESSION_COOKIE_NAME,
-                path="/",
-                samesite="lax",
-                secure=not DEBUG,
-                httponly=True,
-            )
+        if clear_cookie:
+            _delete_session_cookie(response)
         return response
     finally:
+        duration_ms = (time.perf_counter() - request_started) * 1000.0
+        query_count, query_ms = get_request_db_metrics()
+        logger.info(
+            "Request completed | context=%s",
+            {
+                "method": request.method,
+                "path": path,
+                "status": getattr(response, "status_code", 500),
+                "duration_ms": round(duration_ms, 2),
+                "db_query_count": query_count,
+                "db_query_ms": round(query_ms, 2),
+            },
+        )
+        end_request_observation(observation_tokens)
         if conn:
             conn.close()
 
@@ -1735,8 +1814,8 @@ async def admin_settings_page(
         default_user_id = permission_matrix_users[0]["id"]
     permission_matrix_users_json = json.dumps(permission_matrix_users).replace("<", "\\u003c")
 
-    message = request.query_params.get("message")
-    error = request.query_params.get("error")
+    message = query_param(request, "message")
+    error = query_param(request, "error")
     return templates.TemplateResponse(
         "settings.html",
         template_context(
@@ -2601,6 +2680,7 @@ async def api_delete_vendor(
     """Delete a vendor when it is not referenced by any booking."""
     try:
         vendor_repo = VendorRepository(conn)
+        booking_repo = BookingRepository(conn)
         vendor = vendor_repo.get_by_id(vendor_id)
         if not vendor:
             logger.warning(
@@ -2608,10 +2688,7 @@ async def api_delete_vendor(
             )
             raise HTTPException(status_code=404, detail="Vendor not found")
 
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM bookings WHERE vendor_id = ?", (vendor_id,))
-        row = cur.fetchone()
-        booking_count = int(row[0]) if row and row[0] is not None else 0
+        booking_count = booking_repo.count_by_vendor(vendor_id)
 
         if booking_count > 0:
             logger.warning(
@@ -2625,8 +2702,7 @@ async def api_delete_vendor(
                 ),
             )
 
-        cur.execute("DELETE FROM vendors WHERE vendor_id = ?", (vendor_id,))
-        conn.commit()
+        vendor_repo.delete(vendor_id)
         logger.info(f"Vendor deleted successfully | context={{'vendor_id': '{vendor_id}'}}")
         return {"success": True, "message": f"Vendor {vendor_id} deleted successfully"}
     except HTTPException:
@@ -2767,18 +2843,10 @@ async def api_delete_booking(
             booking = ensure_booking(booking_repo, booking_id, message="Booking not found")
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
-        
-        # Delete all booking items first
+
         items = booking_repo.get_items(booking_id)
-        cur = conn.cursor()
-        
-        with transaction(conn):
-            for item in items:
-                cur.execute("DELETE FROM booking_items WHERE id = ?", (item.id,))
-            
-            # Delete the booking
-            cur.execute("DELETE FROM bookings WHERE booking_id = ?", (booking_id,))
-        
+        booking_repo.delete_with_items(booking_id)
+
         log_booking_history(
             conn,
             event_type="booking_deleted",
@@ -2864,17 +2932,13 @@ async def api_bulk_update_items(
             booking = ensure_booking(booking_repo, booking_id, message="Booking not found")
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
-        
-        cur = conn.cursor()
-        
-        updates = request_data.get("updates", [])
-        removes = request_data.get("removes", [])
 
-        cur.execute(
-            "SELECT id FROM booking_items WHERE booking_id = ?",
-            (booking_id,),
-        )
-        existing_item_ids = {str(row[0]) for row in cur.fetchall()}
+        updates_raw = request_data.get("updates", [])
+        removes_raw = request_data.get("removes", [])
+        updates = updates_raw if isinstance(updates_raw, list) else []
+        removes = removes_raw if isinstance(removes_raw, list) else []
+
+        existing_item_ids = {str(item_id) for item_id in booking_repo.get_item_ids_for_booking(booking_id)}
         remove_item_ids = {str(item_id) for item_id in removes}
         remaining_item_ids = existing_item_ids - remove_item_ids
 
@@ -2890,29 +2954,33 @@ async def api_bulk_update_items(
 
         availability = AvailabilityChecker(conn)
         history_items: List[Dict[str, str]] = []
+        prepared_updates: List[Dict[str, Any]] = []
+        prepared_removes: List[int] = []
         if updates or removes:
             for update in updates:
-                item_id = update.get("id")
+                item_id_raw = update.get("id")
                 start_dt = update.get("start_dt")
                 end_dt = update.get("end_dt")
+                remarks = update.get("remarks", "")
 
-                if not item_id:
+                if item_id_raw is None:
                     raise HTTPException(status_code=400, detail="Update item missing id")
                 if not start_dt or not end_dt:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Update item {item_id}: start_dt and end_dt are required"
+                        detail=f"Update item {item_id_raw}: start_dt and end_dt are required"
                     )
 
-                cur.execute(
-                    "SELECT generator_id FROM booking_items WHERE id = ?",
-                    (item_id,)
-                )
-                row = cur.fetchone()
-                if not row:
+                try:
+                    item_id = int(item_id_raw)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail=f"Update item {item_id_raw}: invalid id")
+
+                existing_item = booking_repo.get_item_by_id(item_id)
+                if not existing_item or existing_item.booking_id != booking_id:
                     raise HTTPException(status_code=404, detail=f"Booking item {item_id} not found")
 
-                generator_id = row[0]
+                generator_id = existing_item.generator_id
                 try:
                     is_available, conflict = availability.is_available(
                         generator_id,
@@ -2929,40 +2997,45 @@ async def api_bulk_update_items(
                         detail=f"Update item {item_id}: Generator {generator_id} not available. Conflict: {conflict}"
                     )
 
+                prepared_updates.append({
+                    "id": item_id,
+                    "start_dt": start_dt,
+                    "end_dt": end_dt,
+                    "remarks": remarks,
+                })
                 history_items.append({
                     "generator_id": generator_id,
                     "start_dt": start_dt
                 })
 
-            for item_id in removes:
+            for item_id_raw in removes:
                 try:
-                    cur.execute(
-                        "SELECT generator_id, start_dt FROM booking_items WHERE id = ?",
-                        (item_id,)
-                    )
-                    row = cur.fetchone()
-                    if row:
-                        history_items.append({
-                            "generator_id": row[0],
-                            "start_dt": row[1]
-                        })
-                except Exception:
-                    logger.warning(
-                        f"Unable to load booking item for history | context={{'id': {item_id}}}",
-                        exc_info=True
-                    )
-        
+                    item_id = int(item_id_raw)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail=f"Remove item {item_id_raw}: invalid id")
+
+                existing_item = booking_repo.get_item_by_id(item_id)
+                if not existing_item or existing_item.booking_id != booking_id:
+                    raise HTTPException(status_code=404, detail=f"Booking item {item_id} not found")
+
+                prepared_removes.append(item_id)
+                history_items.append({
+                    "generator_id": existing_item.generator_id,
+                    "start_dt": existing_item.start_dt
+                })
+
         with transaction(conn):
-            for update in updates:
-                cur.execute(
-                    "UPDATE booking_items SET start_dt = ?, end_dt = ?, remarks = ? WHERE id = ?",
-                    (update["start_dt"], update["end_dt"], update["remarks"], update["id"])
+            for update in prepared_updates:
+                booking_repo.update_item(
+                    update["id"],
+                    update["start_dt"],
+                    update["end_dt"],
+                    update["remarks"],
+                    commit=False,
                 )
-            
-            # Remove items
-            for item_id in removes:
-                cur.execute("DELETE FROM booking_items WHERE id = ?", (item_id,))
-        
+            for item_id in prepared_removes:
+                booking_repo.delete_item(item_id, commit=False)
+
         if updates or removes:
             log_booking_history(
                 conn,
@@ -2973,7 +3046,9 @@ async def api_bulk_update_items(
                 summary="Booking items updated",
                 details=encode_history_items(history_items)
             )
-        logger.info(f"Booking items updated | context={{'booking_id': '{booking_id}', 'updates': {len(updates)}, 'removes': {len(removes)}}}")
+        logger.info(
+            f"Booking items updated | context={{'booking_id': '{booking_id}', 'updates': {len(prepared_updates)}, 'removes': {len(prepared_removes)}}}"
+        )
         return {"success": True, "message": "Items updated successfully"}
     except HTTPException:
         raise

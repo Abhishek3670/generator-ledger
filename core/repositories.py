@@ -4,7 +4,9 @@ Repository layer for data access.
 
 import sqlite3
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict
+
+from config import STATUS_CONFIRMED
 
 from .models import (
     Generator,
@@ -142,6 +144,12 @@ class VendorRepository:
                 phone=row[3] or ""
             ))
         return vendors
+
+    def delete(self, vendor_id: str, commit: bool = True) -> None:
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM vendors WHERE vendor_id = ?", (vendor_id,))
+        if commit:
+            self.conn.commit()
     
     def generate_vendor_id(self) -> str:
         """Generate the next vendor ID in sequence (VEN001, VEN002, etc.)."""
@@ -235,6 +243,106 @@ class BookingRepository:
                 remarks=row[6] or ""
             ))
         return items
+
+    def get_item_by_id(self, item_id: int) -> Optional[BookingItem]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT * FROM booking_items WHERE id = ?", (item_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        return BookingItem(
+            id=row[0],
+            booking_id=row[1],
+            generator_id=row[2],
+            start_dt=row[3],
+            end_dt=row[4],
+            item_status=row[5],
+            remarks=row[6] or "",
+        )
+
+    def get_item_ids_for_booking(self, booking_id: str) -> List[int]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT id FROM booking_items WHERE booking_id = ?", (booking_id,))
+        return [int(row[0]) for row in cur.fetchall()]
+
+    def update_item(
+        self,
+        item_id: int,
+        start_dt: str,
+        end_dt: str,
+        remarks: str,
+        commit: bool = True
+    ) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE booking_items SET start_dt = ?, end_dt = ?, remarks = ? WHERE id = ?",
+            (start_dt, end_dt, remarks, item_id)
+        )
+        if commit:
+            self.conn.commit()
+
+    def delete_item(self, item_id: int, commit: bool = True) -> None:
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM booking_items WHERE id = ?", (item_id,))
+        if commit:
+            self.conn.commit()
+
+    def delete_with_items(self, booking_id: str, commit: bool = True) -> int:
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM booking_items WHERE booking_id = ?", (booking_id,))
+        deleted_items = max(int(cur.rowcount), 0)
+        cur.execute("DELETE FROM bookings WHERE booking_id = ?", (booking_id,))
+        if commit:
+            self.conn.commit()
+        return deleted_items
+
+    def count_by_vendor(self, vendor_id: str) -> int:
+        cur = self.conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM bookings WHERE vendor_id = ?", (vendor_id,))
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+    def get_confirmed_generator_periods(
+        self,
+        generator_id: str,
+        exclude_booking_id: Optional[str] = None,
+        confirmed_status: str = STATUS_CONFIRMED
+    ) -> List[Dict[str, str]]:
+        cur = self.conn.cursor()
+        if exclude_booking_id:
+            cur.execute(
+                """
+                SELECT bi.booking_id, bi.start_dt, bi.end_dt
+                FROM booking_items bi
+                JOIN bookings b ON bi.booking_id = b.booking_id
+                WHERE bi.generator_id = ?
+                  AND bi.booking_id != ?
+                  AND bi.item_status = ?
+                  AND b.status = ?
+                """,
+                (generator_id, exclude_booking_id, confirmed_status, confirmed_status),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT bi.booking_id, bi.start_dt, bi.end_dt
+                FROM booking_items bi
+                JOIN bookings b ON bi.booking_id = b.booking_id
+                WHERE bi.generator_id = ?
+                  AND bi.item_status = ?
+                  AND b.status = ?
+                """,
+                (generator_id, confirmed_status, confirmed_status),
+            )
+
+        return [
+            {
+                "booking_id": row[0],
+                "start_dt": row[1],
+                "end_dt": row[2],
+            }
+            for row in cur.fetchall()
+        ]
     
     def save_item(self, item: BookingItem, commit: bool = True) -> None:
         try:

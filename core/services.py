@@ -18,7 +18,6 @@ from .repositories import (
 )
 from .utils import DateTimeParser, DATETIME_FORMAT, transaction
 from .validation import ensure_booking, ensure_generator, ensure_vendor
-from .database import DatabaseManager
 
 
 def encode_history_items(items: List[Dict[str, str]]) -> str:
@@ -69,6 +68,7 @@ class AvailabilityChecker:
     
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
+        self.booking_repo = BookingRepository(conn)
         self.logger = logging.getLogger(self.__class__.__name__)
     
     def is_available(
@@ -81,41 +81,25 @@ class AvailabilityChecker:
         """Check if a generator is available for a given time period."""
         DateTimeParser.validate_period(start_dt, end_dt)
         
-        cur = self.conn.cursor()
-        
         confirmed = BookingStatus.CONFIRMED.value
+        periods = self.booking_repo.get_confirmed_generator_periods(
+            generator_id,
+            exclude_booking_id=exclude_booking_id,
+            confirmed_status=confirmed,
+        )
 
-        if exclude_booking_id:
-            query = """
-            SELECT bi.booking_id, bi.start_dt, bi.end_dt
-            FROM booking_items bi
-            JOIN bookings b ON bi.booking_id = b.booking_id
-            WHERE bi.generator_id = ?
-              AND bi.booking_id != ?
-              AND bi.item_status = ?
-              AND b.status = ?
-            """
-            cur.execute(query, (generator_id, exclude_booking_id, confirmed, confirmed))
-        else:
-            query = """
-            SELECT bi.booking_id, bi.start_dt, bi.end_dt
-            FROM booking_items bi
-            JOIN bookings b ON bi.booking_id = b.booking_id
-            WHERE bi.generator_id = ?
-              AND bi.item_status = ?
-              AND b.status = ?
-            """
-            cur.execute(query, (generator_id, confirmed, confirmed))
-        
-        rows = cur.fetchall()
-        
-        for row in rows:
-            if DateTimeParser.periods_overlap(start_dt, end_dt, row[1], row[2]):
-                self.logger.debug(f"Conflict detected | context={{'generator_id': '{generator_id}', 'conflicting_booking': '{row[0]}'}}")
+        for period in periods:
+            existing_start = period["start_dt"]
+            existing_end = period["end_dt"]
+            conflicting_booking = period["booking_id"]
+            if DateTimeParser.periods_overlap(start_dt, end_dt, existing_start, existing_end):
+                self.logger.debug(
+                    f"Conflict detected | context={{'generator_id': '{generator_id}', 'conflicting_booking': '{conflicting_booking}'}}"
+                )
                 return False, {
-                    "conflict_with": row[0],
-                    "existing_start": row[1],
-                    "existing_end": row[2]
+                    "conflict_with": conflicting_booking,
+                    "existing_start": existing_start,
+                    "existing_end": existing_end
                 }
         
         return True, None

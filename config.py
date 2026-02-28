@@ -10,6 +10,7 @@ import sys
 # Database Configuration
 DB_PATH = os.getenv("DB_PATH", "ledger.db")
 LOAD_SEED_DATA = os.getenv("LOAD_SEED_DATA", "false").lower() == "true"
+DB_SLOW_QUERY_MS = float(os.getenv("DB_SLOW_QUERY_MS", "80"))
 
 # Auth / Session Configuration
 SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
