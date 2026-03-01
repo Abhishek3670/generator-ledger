@@ -4,7 +4,7 @@ Repository layer for data access.
 
 import sqlite3
 import logging
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 
 from config import STATUS_CONFIRMED
 
@@ -95,6 +95,12 @@ class GeneratorRepository:
             ))
         return generators
 
+    def count_by_capacity(self, capacity_kva: int) -> int:
+        cur = self.conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM generators WHERE capacity_kva = ?", (capacity_kva,))
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
 
 class VendorRepository:
     """Repository for vendor data access."""
@@ -150,6 +156,34 @@ class VendorRepository:
         cur.execute("DELETE FROM vendors WHERE vendor_id = ?", (vendor_id,))
         if commit:
             self.conn.commit()
+
+    def find_duplicate_name(
+        self,
+        vendor_name: str,
+        exclude_vendor_id: Optional[str] = None
+    ) -> Optional[str]:
+        cur = self.conn.cursor()
+        if exclude_vendor_id:
+            cur.execute(
+                """
+                SELECT vendor_id
+                FROM vendors
+                WHERE LOWER(vendor_name) = LOWER(?)
+                  AND vendor_id <> ?
+                """,
+                (vendor_name, exclude_vendor_id),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT vendor_id
+                FROM vendors
+                WHERE LOWER(vendor_name) = LOWER(?)
+                """,
+                (vendor_name,),
+            )
+        row = cur.fetchone()
+        return row[0] if row else None
     
     def generate_vendor_id(self) -> str:
         """Generate the next vendor ID in sequence (VEN001, VEN002, etc.)."""
@@ -265,6 +299,33 @@ class BookingRepository:
         cur.execute("SELECT id FROM booking_items WHERE booking_id = ?", (booking_id,))
         return [int(row[0]) for row in cur.fetchall()]
 
+    def get_items_with_capacity(self, booking_id: str) -> List[Dict[str, Any]]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT bi.generator_id,
+                   bi.start_dt,
+                   bi.item_status,
+                   bi.remarks,
+                   g.capacity_kva
+            FROM booking_items bi
+            LEFT JOIN generators g ON g.generator_id = bi.generator_id
+            WHERE bi.booking_id = ?
+            ORDER BY bi.start_dt ASC, bi.id ASC
+            """,
+            (booking_id,),
+        )
+        return [
+            {
+                "generator_id": row[0] or "",
+                "start_dt": row[1] or "",
+                "item_status": row[2] or "",
+                "remarks": row[3] or "",
+                "capacity_kva": row[4],
+            }
+            for row in cur.fetchall()
+        ]
+
     def update_item(
         self,
         item_id: int,
@@ -301,6 +362,223 @@ class BookingRepository:
         cur.execute("SELECT COUNT(*) FROM bookings WHERE vendor_id = ?", (vendor_id,))
         row = cur.fetchone()
         return int(row[0]) if row and row[0] is not None else 0
+
+    def get_booked_generator_ids_for_date(
+        self,
+        selected_date: str,
+        confirmed_status: str = STATUS_CONFIRMED
+    ) -> List[str]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT DISTINCT bi.generator_id
+            FROM booking_items bi
+            JOIN bookings b ON bi.booking_id = b.booking_id
+            WHERE date(bi.start_dt) = ?
+              AND bi.item_status = ?
+              AND b.status = ?
+            """,
+            (selected_date, confirmed_status, confirmed_status),
+        )
+        return [row[0] for row in cur.fetchall()]
+
+    def list_generator_bookings(
+        self,
+        generator_id: str,
+        date_filter: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        cur = self.conn.cursor()
+        if date_filter:
+            cur.execute(
+                """
+                SELECT b.booking_id,
+                       b.vendor_id,
+                       v.vendor_name,
+                       b.status,
+                       bi.start_dt,
+                       bi.end_dt,
+                       bi.item_status,
+                       bi.remarks
+                FROM booking_items bi
+                JOIN bookings b ON bi.booking_id = b.booking_id
+                LEFT JOIN vendors v ON b.vendor_id = v.vendor_id
+                WHERE bi.generator_id = ?
+                  AND date(bi.start_dt) = ?
+                ORDER BY bi.start_dt DESC
+                """,
+                (generator_id, date_filter),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT b.booking_id,
+                       b.vendor_id,
+                       v.vendor_name,
+                       b.status,
+                       bi.start_dt,
+                       bi.end_dt,
+                       bi.item_status,
+                       bi.remarks
+                FROM booking_items bi
+                JOIN bookings b ON bi.booking_id = b.booking_id
+                LEFT JOIN vendors v ON b.vendor_id = v.vendor_id
+                WHERE bi.generator_id = ?
+                ORDER BY bi.start_dt DESC
+                """,
+                (generator_id,),
+            )
+
+        return [
+            {
+                "booking_id": row[0],
+                "vendor_id": row[1],
+                "vendor_name": row[2] or row[1] or "-",
+                "booking_status": row[3],
+                "start_dt": row[4],
+                "end_dt": row[5],
+                "item_status": row[6],
+                "remarks": row[7] or "",
+            }
+            for row in cur.fetchall()
+        ]
+
+    def list_vendor_booking_rows(self, vendor_id: str) -> List[Dict[str, Any]]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT b.booking_id,
+                   b.status,
+                   b.created_at,
+                   bi.id,
+                   bi.generator_id,
+                   g.capacity_kva,
+                   bi.start_dt,
+                   bi.end_dt,
+                   bi.item_status,
+                   bi.remarks
+            FROM bookings b
+            LEFT JOIN booking_items bi ON bi.booking_id = b.booking_id
+            LEFT JOIN generators g ON g.generator_id = bi.generator_id
+            WHERE b.vendor_id = ?
+            ORDER BY b.created_at DESC, b.booking_id DESC, bi.start_dt ASC, bi.id ASC
+            """,
+            (vendor_id,),
+        )
+        return [
+            {
+                "booking_id": row[0],
+                "booking_status": row[1],
+                "created_at": row[2] or "",
+                "item_id": row[3],
+                "generator_id": row[4],
+                "capacity_kva": row[5],
+                "start_dt": row[6],
+                "end_dt": row[7],
+                "item_status": row[8],
+                "remarks": row[9] or "",
+            }
+            for row in cur.fetchall()
+        ]
+
+    def list_billing_line_rows(
+        self,
+        from_date: str,
+        to_date: str,
+        confirmed_status: str = STATUS_CONFIRMED
+    ) -> List[Dict[str, Any]]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT v.vendor_id,
+                   v.vendor_name,
+                   b.booking_id,
+                   date(bi.start_dt) AS booked_date,
+                   bi.generator_id,
+                   g.capacity_kva
+            FROM booking_items bi
+            JOIN bookings b ON b.booking_id = bi.booking_id
+            JOIN vendors v ON v.vendor_id = b.vendor_id
+            LEFT JOIN generators g ON g.generator_id = bi.generator_id
+            WHERE date(bi.start_dt) >= ?
+              AND date(bi.start_dt) <= ?
+              AND bi.item_status = ?
+              AND b.status = ?
+            ORDER BY v.vendor_name ASC,
+                     v.vendor_id ASC,
+                     date(bi.start_dt) ASC,
+                     bi.generator_id ASC,
+                     b.booking_id ASC,
+                     bi.id ASC
+            """,
+            (from_date, to_date, confirmed_status, confirmed_status),
+        )
+        return [
+            {
+                "vendor_id": row[0],
+                "vendor_name": row[1],
+                "booking_id": row[2],
+                "booked_date": row[3],
+                "generator_id": row[4],
+                "capacity_kva": row[5],
+            }
+            for row in cur.fetchall()
+        ]
+
+    def list_calendar_event_counts(
+        self,
+        confirmed_status: str = STATUS_CONFIRMED
+    ) -> List[Dict[str, Any]]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT date(bi.start_dt) as booking_date, COUNT(*) as item_count
+            FROM booking_items bi
+            JOIN bookings b ON bi.booking_id = b.booking_id
+            WHERE bi.item_status = ? AND b.status = ?
+            GROUP BY booking_date
+            ORDER BY booking_date ASC
+            """,
+            (confirmed_status, confirmed_status),
+        )
+        return [
+            {"booking_date": row[0], "item_count": row[1]}
+            for row in cur.fetchall()
+        ]
+
+    def list_calendar_day_rows(
+        self,
+        selected_date: str,
+        confirmed_status: str = STATUS_CONFIRMED
+    ) -> List[Dict[str, Any]]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT v.vendor_id, v.vendor_name, b.booking_id, bi.generator_id,
+                   g.capacity_kva, bi.start_dt, bi.end_dt, bi.remarks
+            FROM booking_items bi
+            JOIN bookings b ON bi.booking_id = b.booking_id
+            JOIN vendors v ON b.vendor_id = v.vendor_id
+            LEFT JOIN generators g ON bi.generator_id = g.generator_id
+            WHERE date(bi.start_dt) = ?
+              AND bi.item_status = ?
+              AND b.status = ?
+            ORDER BY v.vendor_name, b.booking_id
+            """,
+            (selected_date, confirmed_status, confirmed_status),
+        )
+        return [
+            {
+                "vendor_id": row[0],
+                "vendor_name": row[1],
+                "booking_id": row[2],
+                "generator_id": row[3],
+                "capacity_kva": row[4],
+                "start_dt": row[5],
+                "end_dt": row[6],
+                "remarks": row[7] or "",
+            }
+            for row in cur.fetchall()
+        ]
 
     def get_confirmed_generator_periods(
         self,

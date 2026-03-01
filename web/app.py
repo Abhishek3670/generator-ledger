@@ -335,34 +335,8 @@ def _fetch_booking_items_with_capacity(
     booking_id: str,
 ) -> List[Dict[str, Any]]:
     """Return booking items with optional generator capacity metadata."""
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT bi.generator_id,
-               bi.start_dt,
-               bi.item_status,
-               bi.remarks,
-               g.capacity_kva
-        FROM booking_items bi
-        LEFT JOIN generators g ON g.generator_id = bi.generator_id
-        WHERE bi.booking_id = ?
-        ORDER BY bi.start_dt ASC, bi.id ASC
-        """,
-        (booking_id,),
-    )
-
-    items: List[Dict[str, Any]] = []
-    for row in cur.fetchall():
-        items.append(
-            {
-                "generator_id": row[0] or "",
-                "start_dt": row[1] or "",
-                "item_status": row[2] or "",
-                "remarks": row[3] or "",
-                "capacity_kva": row[4],
-            }
-        )
-    return items
+    booking_repo = BookingRepository(conn)
+    return booking_repo.get_items_with_capacity(booking_id)
 
 
 def _build_booking_date_rows(
@@ -1252,19 +1226,8 @@ async def generators_page(request: Request, conn: sqlite3.Connection = Depends(g
 
         booking_status = {}
         if selected_date:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT DISTINCT bi.generator_id
-                FROM booking_items bi
-                JOIN bookings b ON bi.booking_id = b.booking_id
-                WHERE date(bi.start_dt) = ?
-                  AND bi.item_status = ?
-                  AND b.status = ?
-                """,
-                (selected_date, STATUS_CONFIRMED, STATUS_CONFIRMED)
-            )
-            booked_ids = {row[0] for row in cur.fetchall()}
+            booking_repo = BookingRepository(conn)
+            booked_ids = set(booking_repo.get_booked_generator_ids_for_date(selected_date))
             booking_status = {
                 gen.generator_id: ("Booked" if gen.generator_id in booked_ids else "Free")
                 for gen in generators
@@ -2083,59 +2046,8 @@ async def api_generator_bookings(
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid date format (YYYY-MM-DD)")
 
-        cur = conn.cursor()
-        if date:
-            cur.execute(
-                """
-                SELECT b.booking_id,
-                       b.vendor_id,
-                       v.vendor_name,
-                       b.status,
-                       bi.start_dt,
-                       bi.end_dt,
-                       bi.item_status,
-                       bi.remarks
-                FROM booking_items bi
-                JOIN bookings b ON bi.booking_id = b.booking_id
-                LEFT JOIN vendors v ON b.vendor_id = v.vendor_id
-                WHERE bi.generator_id = ?
-                  AND date(bi.start_dt) = ?
-                ORDER BY bi.start_dt DESC
-                """,
-                (generator_id, date)
-            )
-        else:
-            cur.execute(
-                """
-                SELECT b.booking_id,
-                       b.vendor_id,
-                       v.vendor_name,
-                       b.status,
-                       bi.start_dt,
-                       bi.end_dt,
-                       bi.item_status,
-                       bi.remarks
-                FROM booking_items bi
-                JOIN bookings b ON bi.booking_id = b.booking_id
-                LEFT JOIN vendors v ON b.vendor_id = v.vendor_id
-                WHERE bi.generator_id = ?
-                ORDER BY bi.start_dt DESC
-                """,
-                (generator_id,)
-            )
-
-        bookings = []
-        for row in cur.fetchall():
-            bookings.append({
-                "booking_id": row[0],
-                "vendor_id": row[1],
-                "vendor_name": row[2] or row[1] or "-",
-                "booking_status": row[3],
-                "start_dt": row[4],
-                "end_dt": row[5],
-                "item_status": row[6],
-                "remarks": row[7] or ""
-            })
+        booking_repo = BookingRepository(conn)
+        bookings = booking_repo.list_generator_bookings(generator_id, date_filter=date)
 
         return {
             "generator_id": generator_id,
@@ -2192,9 +2104,7 @@ async def api_create_generator(
         parts.append(type_token)
 
         gen_repo = GeneratorRepository(conn)
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM generators WHERE capacity_kva = ?", (capacity_kva,))
-        base_count = int(cur.fetchone()[0] or 0)
+        base_count = gen_repo.count_by_capacity(capacity_kva)
 
         counter = base_count
         generator_id = ""
@@ -2253,32 +2163,13 @@ async def api_vendor_bookings(vendor_id: str, conn: sqlite3.Connection = Depends
     """Get all bookings (all statuses) for a specific vendor."""
     try:
         vendor_repo = VendorRepository(conn)
+        booking_repo = BookingRepository(conn)
         vendor = vendor_repo.get_by_id(vendor_id)
         if not vendor:
             logger.warning(f"Vendor bookings lookup failed | context={{'vendor_id': '{vendor_id}', 'reason': 'not found'}}")
             raise HTTPException(status_code=404, detail="Vendor not found")
 
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT b.booking_id,
-                   b.status,
-                   b.created_at,
-                   bi.id,
-                   bi.generator_id,
-                   g.capacity_kva,
-                   bi.start_dt,
-                   bi.end_dt,
-                   bi.item_status,
-                   bi.remarks
-            FROM bookings b
-            LEFT JOIN booking_items bi ON bi.booking_id = b.booking_id
-            LEFT JOIN generators g ON g.generator_id = bi.generator_id
-            WHERE b.vendor_id = ?
-            ORDER BY b.created_at DESC, b.booking_id DESC, bi.start_dt ASC, bi.id ASC
-            """,
-            (vendor_id,),
-        )
+        rows = booking_repo.list_vendor_booking_rows(vendor_id)
 
         status_counts: Dict[str, int] = {
             STATUS_CONFIRMED: 0,
@@ -2287,17 +2178,17 @@ async def api_vendor_bookings(vendor_id: str, conn: sqlite3.Connection = Depends
         }
         booking_map: Dict[str, Dict[str, Any]] = {}
 
-        for row in cur.fetchall():
-            booking_id = row[0]
-            booking_status = row[1] or STATUS_PENDING
-            created_at = row[2] or ""
-            item_id = row[3]
-            generator_id = row[4]
-            capacity_kva = row[5]
-            start_dt = row[6]
-            end_dt = row[7]
-            item_status = row[8]
-            remarks = row[9] or ""
+        for row in rows:
+            booking_id = row["booking_id"]
+            booking_status = row["booking_status"] or STATUS_PENDING
+            created_at = row["created_at"] or ""
+            item_id = row["item_id"]
+            generator_id = row["generator_id"]
+            capacity_kva = row["capacity_kva"]
+            start_dt = row["start_dt"]
+            end_dt = row["end_dt"]
+            item_status = row["item_status"]
+            remarks = row["remarks"] or ""
 
             if booking_id not in booking_map:
                 booking_map[booking_id] = {
@@ -2398,51 +2289,15 @@ async def api_billing_lines(
             )
             raise HTTPException(status_code=400, detail='"from" cannot be later than "to"')
 
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT v.vendor_id,
-                   v.vendor_name,
-                   b.booking_id,
-                   date(bi.start_dt) AS booked_date,
-                   bi.generator_id,
-                   g.capacity_kva
-            FROM booking_items bi
-            JOIN bookings b ON b.booking_id = bi.booking_id
-            JOIN vendors v ON v.vendor_id = b.vendor_id
-            LEFT JOIN generators g ON g.generator_id = bi.generator_id
-            WHERE date(bi.start_dt) >= ?
-              AND date(bi.start_dt) <= ?
-              AND bi.item_status = ?
-              AND b.status = ?
-            ORDER BY v.vendor_name ASC,
-                     v.vendor_id ASC,
-                     date(bi.start_dt) ASC,
-                     bi.generator_id ASC,
-                     b.booking_id ASC,
-                     bi.id ASC
-            """,
-            (from_date, to_date, STATUS_CONFIRMED, STATUS_CONFIRMED),
-        )
+        booking_repo = BookingRepository(conn)
+        rows = booking_repo.list_billing_line_rows(from_date, to_date)
 
-        rows: List[Dict[str, Any]] = []
         capacities: set[int] = set()
 
-        for row in cur.fetchall():
-            capacity_kva = row[5]
+        for row in rows:
+            capacity_kva = row["capacity_kva"]
             if isinstance(capacity_kva, int):
                 capacities.add(capacity_kva)
-
-            rows.append(
-                {
-                    "vendor_id": row[0],
-                    "vendor_name": row[1],
-                    "booking_id": row[2],
-                    "booked_date": row[3],
-                    "generator_id": row[4],
-                    "capacity_kva": capacity_kva,
-                }
-            )
 
         logger.info(
             "Billing lines fetched | context="
@@ -2466,22 +2321,12 @@ async def api_billing_lines(
 async def api_calendar_events(conn: sqlite3.Connection = Depends(get_db)):
     """Calendar events aggregated by date (confirmed bookings only)."""
     try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT date(bi.start_dt) as booking_date, COUNT(*) as item_count
-            FROM booking_items bi
-            JOIN bookings b ON bi.booking_id = b.booking_id
-            WHERE bi.item_status = ? AND b.status = ?
-            GROUP BY booking_date
-            ORDER BY booking_date ASC
-            """,
-            (STATUS_CONFIRMED, STATUS_CONFIRMED),
-        )
+        booking_repo = BookingRepository(conn)
+        rows = booking_repo.list_calendar_event_counts()
         events = []
-        for row in cur.fetchall():
-            booking_date = row[0]
-            item_count = row[1]
+        for row in rows:
+            booking_date = row["booking_date"]
+            item_count = row["item_count"]
             events.append({
                 "title": f"{item_count} booking(s)",
                 "start": booking_date,
@@ -2503,26 +2348,19 @@ async def api_calendar_day(date: str, conn: sqlite3.Connection = Depends(get_db)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format (YYYY-MM-DD)")
 
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT v.vendor_id, v.vendor_name, b.booking_id, bi.generator_id,
-                   g.capacity_kva, bi.start_dt, bi.end_dt, bi.remarks
-            FROM booking_items bi
-            JOIN bookings b ON bi.booking_id = b.booking_id
-            JOIN vendors v ON b.vendor_id = v.vendor_id
-            LEFT JOIN generators g ON bi.generator_id = g.generator_id
-            WHERE date(bi.start_dt) = ?
-              AND bi.item_status = ?
-              AND b.status = ?
-            ORDER BY v.vendor_name, b.booking_id
-            """,
-            (date, STATUS_CONFIRMED, STATUS_CONFIRMED),
-        )
+        booking_repo = BookingRepository(conn)
+        rows = booking_repo.list_calendar_day_rows(date)
 
         vendors: Dict[str, Dict[str, Any]] = {}
-        for row in cur.fetchall():
-            vendor_id, vendor_name, booking_id, generator_id, capacity_kva, start_dt, end_dt, remarks = row
+        for row in rows:
+            vendor_id = row["vendor_id"]
+            vendor_name = row["vendor_name"]
+            booking_id = row["booking_id"]
+            generator_id = row["generator_id"]
+            capacity_kva = row["capacity_kva"]
+            start_dt = row["start_dt"]
+            end_dt = row["end_dt"]
+            remarks = row["remarks"]
             if vendor_id not in vendors:
                 vendors[vendor_id] = {
                     "vendor_id": vendor_id,
@@ -2624,25 +2462,15 @@ async def api_update_vendor(
         if not vendor_name:
             raise HTTPException(status_code=400, detail="Vendor Name is required")
 
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT vendor_id
-            FROM vendors
-            WHERE LOWER(vendor_name) = LOWER(?)
-              AND vendor_id <> ?
-            """,
-            (vendor_name, vendor_id),
-        )
-        duplicate = cur.fetchone()
-        if duplicate:
+        duplicate_vendor_id = vendor_repo.find_duplicate_name(vendor_name, exclude_vendor_id=vendor_id)
+        if duplicate_vendor_id:
             logger.warning(
                 "Vendor update failed | context="
-                f"{{'vendor_id': '{vendor_id}', 'reason': 'duplicate name', 'duplicate_vendor_id': '{duplicate[0]}'}}"
+                f"{{'vendor_id': '{vendor_id}', 'reason': 'duplicate name', 'duplicate_vendor_id': '{duplicate_vendor_id}'}}"
             )
             raise HTTPException(
                 status_code=400,
-                detail=f"Vendor name '{vendor_name}' already exists with ID '{duplicate[0]}'",
+                detail=f"Vendor name '{vendor_name}' already exists with ID '{duplicate_vendor_id}'",
             )
 
         vendor_repo.save(
