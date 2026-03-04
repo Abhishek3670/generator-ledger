@@ -10,6 +10,11 @@ from typing import Optional, Iterator
 from config import DATETIME_FORMAT, DEFAULT_TIME
 
 
+def now_ts() -> int:
+    """Return current UTC timestamp in seconds."""
+    return int(datetime.utcnow().timestamp())
+
+
 class DateTimeParser:
     """Utility class for parsing various datetime formats."""
     

@@ -44,7 +44,7 @@ from core.observability import (
     end_request_observation,
     get_request_db_metrics,
 )
-from core.utils import transaction
+from core.utils import transaction, now_ts
 from core.validation import ensure_booking
 from core.services import create_vendor, archive_all_bookings, log_booking_history, encode_history_items
 from core.auth import (
@@ -448,11 +448,6 @@ def template_context(request: Request, **kwargs: Any) -> Dict[str, Any]:
     }
     context.update(kwargs)
     return context
-
-
-def now_ts() -> int:
-    """Return current UTC timestamp in seconds."""
-    return int(datetime.utcnow().timestamp())
 
 
 def is_api_request(request: Request) -> bool:
@@ -887,7 +882,6 @@ def initialize_app():
     # Cleanup expired sessions and revoked tokens on startup
     try:
         from core.repositories import SessionRepository, RevokedTokenRepository
-        from core.utils import now_ts
 
         current_time = now_ts()
 
