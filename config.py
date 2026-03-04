@@ -7,6 +7,13 @@ from logging.handlers import RotatingFileHandler
 import logging
 import sys
 
+# Load environment variables from .env file if it exists
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed (ok for Docker)
+
 # Database Configuration
 DB_PATH = os.getenv("DB_PATH", "ledger.db")
 LOAD_SEED_DATA = os.getenv("LOAD_SEED_DATA", "false").lower() == "true"
