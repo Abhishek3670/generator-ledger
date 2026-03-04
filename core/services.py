@@ -56,7 +56,7 @@ def log_booking_history(
             details=details
         )
         repo.save(event)
-    except Exception:
+    except (ValueError, sqlite3.Error, KeyError):
         logger.warning(
             f"Failed to record history | context={{'event_type': '{event_type}', 'booking_id': '{booking_id}'}}",
             exc_info=True
@@ -561,7 +561,7 @@ class ExportService:
                 os.path.join(out_dir, "bookings.csv"),
                 os.path.join(out_dir, "booking_items.csv")
             )
-        except Exception:
+        except (OSError, IOError, sqlite3.Error, pandas.errors.DatabaseError):
             self.logger.error("Export failed", exc_info=True)
             raise
 
@@ -586,8 +586,11 @@ class DataLoader:
             try:
                 gdf = pd.read_excel(self.GENERATOR_DB_PATH)
                 self.logger.info(f"Read generator file | context={{'shape': {gdf.shape}}}")
-                
+
                 loaded_count = 0
+                failed_count = 0
+                failed_rows = []
+
                 for idx, row in gdf.iterrows():
                     try:
                         generator = Generator(
@@ -601,9 +604,24 @@ class DataLoader:
                         self.generator_repo.save(generator)
                         loaded_count += 1
                     except Exception as row_error:
+                        failed_count += 1
+                        failed_rows.append((idx, str(row_error)))
                         self.logger.error(f"Failed to process generator row | context={{'index': {idx}, 'error': '{row_error}'}}", exc_info=True)
-                
-                self.logger.info(f"Generator load complete | context={{'loaded': {loaded_count}, 'total': {len(gdf)}}}")
+
+                # Log summary and warn if failure rate is high
+                total_rows = len(gdf)
+                failure_rate = (failed_count / total_rows * 100) if total_rows > 0 else 0
+
+                if failed_count > 0:
+                    self.logger.warning(
+                        f"Generator load completed with failures | context={{'loaded': {loaded_count}, 'failed': {failed_count}, "
+                        f"'total': {total_rows}, 'failure_rate': {failure_rate:.1f}%}}"
+                    )
+                    if failure_rate > 10:  # >10% failure
+                        self.logger.warning(f"High failure rate ({failure_rate:.1f}%) loading generators. Check data quality.")
+                else:
+                    self.logger.info(f"Generator load complete | context={{'loaded': {loaded_count}, 'total': {total_rows}}}")
+
             except Exception as e:
                 self.logger.error("Critical error loading generators", exc_info=True)
         else:
@@ -615,8 +633,11 @@ class DataLoader:
             try:
                 vdf = pd.read_excel(self.VENDOR_DB_PATH)
                 self.logger.info(f"Read vendor file | context={{'shape': {vdf.shape}}}")
-                
+
                 loaded_count = 0
+                failed_count = 0
+                failed_rows = []
+
                 for idx, row in vdf.iterrows():
                     try:
                         vendor = Vendor(
@@ -628,9 +649,24 @@ class DataLoader:
                         self.vendor_repo.save(vendor)
                         loaded_count += 1
                     except Exception as row_error:
+                        failed_count += 1
+                        failed_rows.append((idx, str(row_error)))
                         self.logger.error(f"Failed to process vendor row | context={{'index': {idx}, 'error': '{row_error}'}}", exc_info=True)
-                
-                self.logger.info(f"Vendor load complete | context={{'loaded': {loaded_count}, 'total': {len(vdf)}}}")
+
+                # Log summary and warn if failure rate is high
+                total_rows = len(vdf)
+                failure_rate = (failed_count / total_rows * 100) if total_rows > 0 else 0
+
+                if failed_count > 0:
+                    self.logger.warning(
+                        f"Vendor load completed with failures | context={{'loaded': {loaded_count}, 'failed': {failed_count}, "
+                        f"'total': {total_rows}, 'failure_rate': {failure_rate:.1f}%}}"
+                    )
+                    if failure_rate > 10:  # >10% failure
+                        self.logger.warning(f"High failure rate ({failure_rate:.1f}%) loading vendors. Check data quality.")
+                else:
+                    self.logger.info(f"Vendor load complete | context={{'loaded': {loaded_count}, 'total': {total_rows}}}")
+
             except Exception as e:
                 self.logger.error("Critical error loading vendors", exc_info=True)
         else:

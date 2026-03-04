@@ -876,13 +876,30 @@ def initialize_app():
     db_manager.init_schema()
 
     ensure_owner_user(conn, OWNER_USERNAME, OWNER_PASSWORD, strict=True)
-    
+
     # Load sample data
     if LOAD_SEED_DATA:
         loader = DataLoader(conn)
         loader.load_from_excel()
     else:
         logger.info("Seed data load skipped (LOAD_SEED_DATA=false)")
+
+    # Cleanup expired sessions and revoked tokens on startup
+    try:
+        from core.repositories import SessionRepository, RevokedTokenRepository
+        from core.utils import now_ts
+
+        current_time = now_ts()
+
+        session_repo = SessionRepository(conn)
+        session_repo.delete_expired(current_time)
+        logger.info("Startup cleanup: Expired sessions deleted")
+
+        token_repo = RevokedTokenRepository(conn)
+        token_repo.delete_expired(current_time)
+        logger.info("Startup cleanup: Expired revoked tokens deleted")
+    except Exception as e:
+        logger.warning(f"Failed to cleanup expired sessions/tokens on startup: {e}", exc_info=False)
 
     db_manager.close()
     logger.info("FastAPI application initialized successfully")
@@ -981,7 +998,7 @@ def _collect_temperature_metrics() -> Dict[str, Any]:
 
     try:
         sensor_map = psutil.sensors_temperatures(fahrenheit=False) or {}
-    except Exception:
+    except (OSError, RuntimeError, AttributeError):
         logger.warning("Failed reading temperature sensors", exc_info=True)
         return _build_temperature_unavailable("Temperature sensor read failed")
 
@@ -1077,7 +1094,8 @@ async def login(
     if is_json:
         try:
             payload = await request.json()
-        except Exception:
+        except (ValueError, RuntimeError):  # JSONDecodeError inherits from ValueError
+            logger.warning("Failed to parse JSON payload in login request", exc_info=False)
             payload = {}
         username = payload.get("username")
         password = payload.get("password")

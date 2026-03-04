@@ -54,6 +54,14 @@ class CLI:
     
     def print_table(self, table: str) -> None:
         """Print a database table."""
+        # Whitelist allowed table names to prevent SQL injection
+        ALLOWED_TABLES = ("generators", "vendors", "bookings", "booking_items", "users", "sessions", "booking_history")
+
+        if table not in ALLOWED_TABLES:
+            self.logger.error(f"Attempted access to invalid table | context={{'table': '{table}'}}")
+            print(f"Error: Table '{table}' is not allowed")
+            return
+
         try:
             df = pd.read_sql_query(f"SELECT * FROM {table}", self.conn)
             print(f"\n{table.upper()}:")
