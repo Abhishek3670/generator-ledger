@@ -7,6 +7,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.exceptions import RequestValidationError
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import os
 import json
 import sqlite3
@@ -16,7 +19,7 @@ from typing import Optional, List, Dict, Any, Tuple
 import logging
 import re
 import hashlib
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 import jwt
 try:
     import psutil
@@ -92,42 +95,174 @@ logger = logging.getLogger(__name__)
 
 # Pydantic models for request bodies
 class BookingItem(BaseModel):
-    generator_id: Optional[str] = None
-    capacity_kva: Optional[int] = None
-    date: str
-    remarks: str = ""
+    generator_id: Optional[str] = Field(None, max_length=50)
+    capacity_kva: Optional[int] = Field(None, gt=0)  # Must be > 0
+    date: str = Field(..., max_length=50)
+    remarks: str = Field(default="", max_length=500)
+
+    @field_validator('generator_id')
+    @classmethod
+    def validate_generator_id(cls, v):
+        if v is not None and len(v.strip()) == 0:
+            raise ValueError('Generator ID cannot be empty string')
+        return v
+
+    @field_validator('date')
+    @classmethod
+    def validate_date(cls, v):
+        if not v or len(v.strip()) == 0:
+            raise ValueError('Date cannot be empty')
+        return v
+
+    @field_validator('remarks')
+    @classmethod
+    def validate_remarks(cls, v):
+        if '<' in v or '>' in v or 'script' in v.lower():
+            raise ValueError('HTML/script tags not allowed in remarks')
+        return v
+
 
 class CreateBookingRequest(BaseModel):
-    vendor_id: str
-    items: List[BookingItem]
+    vendor_id: str = Field(..., min_length=1, max_length=50)
+    items: List[BookingItem] = Field(..., min_items=1)
+
+    @field_validator('vendor_id')
+    @classmethod
+    def validate_vendor_id(cls, v):
+        if not v or len(v.strip()) == 0:
+            raise ValueError('Vendor ID cannot be empty')
+        return v.strip()
+
 
 class CreateVendorRequest(BaseModel):
-    vendor_id: Optional[str] = None
-    vendor_name: str
-    vendor_place: str = "Civil Line"
-    phone: str = ""
+    vendor_id: Optional[str] = Field(None, max_length=50)
+    vendor_name: str = Field(..., min_length=1, max_length=200)
+    vendor_place: str = Field(default="Civil Line", max_length=200)
+    phone: str = Field(default="", max_length=20)
+
+    @field_validator('vendor_name')
+    @classmethod
+    def validate_vendor_name(cls, v):
+        if not v or len(v.strip()) == 0:
+            raise ValueError('Vendor name cannot be empty')
+        if '<' in v or '>' in v or 'script' in v.lower():
+            raise ValueError('HTML/script tags not allowed in vendor name')
+        return v.strip()
+
+    @field_validator('vendor_place')
+    @classmethod
+    def validate_vendor_place(cls, v):
+        if v and ('<' in v or '>' in v or 'script' in v.lower()):
+            raise ValueError('HTML/script tags not allowed in vendor place')
+        return v
+
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v):
+        if v and not re.match(r'^[\d\-\+\s\(\)]*$', v):
+            raise ValueError('Phone number contains invalid characters')
+        return v
 
 
 class UpdateVendorRequest(BaseModel):
-    vendor_name: str
-    vendor_place: str = "Civil Line"
-    phone: str = ""
+    vendor_name: str = Field(..., min_length=1, max_length=200)
+    vendor_place: str = Field(default="Civil Line", max_length=200)
+    phone: str = Field(default="", max_length=20)
+
+    @field_validator('vendor_name')
+    @classmethod
+    def validate_vendor_name(cls, v):
+        if not v or len(v.strip()) == 0:
+            raise ValueError('Vendor name cannot be empty')
+        if '<' in v or '>' in v or 'script' in v.lower():
+            raise ValueError('HTML/script tags not allowed in vendor name')
+        return v.strip()
+
+    @field_validator('vendor_place')
+    @classmethod
+    def validate_vendor_place(cls, v):
+        if v and ('<' in v or '>' in v or 'script' in v.lower()):
+            raise ValueError('HTML/script tags not allowed in vendor place')
+        return v
+
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v):
+        if v and not re.match(r'^[\d\-\+\s\(\)]*$', v):
+            raise ValueError('Phone number contains invalid characters')
+        return v
 
 
 class CreateGeneratorRequest(BaseModel):
-    capacity_kva: int
-    type: str
-    identification: str = ""
-    notes: str = ""
-    status: Optional[str] = GEN_STATUS_ACTIVE
+    capacity_kva: int = Field(..., gt=0)  # Must be > 0
+    type: str = Field(..., min_length=1, max_length=100)
+    identification: str = Field(default="", max_length=200)
+    notes: str = Field(default="", max_length=500)
+    status: Optional[str] = Field(default=GEN_STATUS_ACTIVE, max_length=50)
+
+    @field_validator('type')
+    @classmethod
+    def validate_type(cls, v):
+        if not v or len(v.strip()) == 0:
+            raise ValueError('Generator type cannot be empty')
+        if '<' in v or '>' in v or 'script' in v.lower():
+            raise ValueError('HTML/script tags not allowed in type')
+        return v.strip()
+
+    @field_validator('identification')
+    @classmethod
+    def validate_identification(cls, v):
+        if v and ('<' in v or '>' in v or 'script' in v.lower()):
+            raise ValueError('HTML/script tags not allowed in identification')
+        return v
+
+    @field_validator('notes')
+    @classmethod
+    def validate_notes(cls, v):
+        if v and ('<' in v or '>' in v or 'script' in v.lower()):
+            raise ValueError('HTML/script tags not allowed in notes')
+        return v
+
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v):
+        if v and v not in [GEN_STATUS_ACTIVE, GEN_STATUS_INACTIVE, GEN_STATUS_MAINTENANCE]:
+            raise ValueError(f'Status must be one of: {GEN_STATUS_ACTIVE}, {GEN_STATUS_INACTIVE}, {GEN_STATUS_MAINTENANCE}')
+        return v
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=1, max_length=100)
+    password: str = Field(..., min_length=1, max_length=100)
+
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v):
+        if not v or len(v.strip()) == 0:
+            raise ValueError('Username cannot be empty')
+        if len(v) > 50:
+            raise ValueError('Username too long')
+        return v.strip()
+
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v):
+        if not v or len(v.strip()) == 0:
+            raise ValueError('Password cannot be empty')
+        if len(v) > 72:
+            raise ValueError('Password too long (bcrypt limit is 72 chars)')
+        return v
 
 # FastAPI app
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
+
+# Rate limiter configuration
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, lambda request, exc: JSONResponse(
+    status_code=429,
+    content={"detail": "Too many requests. Please try again later."}
+))
 
 if not SESSION_SECRET:
     raise RuntimeError("SESSION_SECRET must be set for production authentication")
@@ -319,6 +454,30 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         template_context(request, error=exc.detail),
         status_code=exc.status_code
     )
+
+# Helper function for secure error handling
+def handle_error(
+    error: Exception,
+    status_code: int = 500,
+    message: str = "An error occurred",
+    log_details: bool = True
+) -> Tuple[str, int]:
+    """
+    Handle errors securely by logging details server-side
+    and returning generic messages to clients.
+
+    Args:
+        error: The exception to handle
+        status_code: HTTP status code
+        message: Generic message to return to client
+        log_details: Whether to log exception details
+
+    Returns:
+        Tuple of (generic_message, status_code)
+    """
+    if log_details:
+        logger.error(f"{message} (status={status_code}): {str(error)}", exc_info=True)
+    return message, status_code
 
 # Static files and templates
 template_dir = os.path.join(os.path.dirname(__file__), "templates")
@@ -634,7 +793,7 @@ async def get_db(request: Request):
         yield conn
     except sqlite3.Error as e:
         logger.error(f"Database connection failed | context={{'db_path': '{DB_PATH}'}}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Database connection error")
     finally:
         if conn:
             conn.close()
@@ -654,6 +813,16 @@ def require_role(*roles: str):
         user = get_current_user(request)
         if user.role not in roles:
             raise HTTPException(status_code=403, detail="Forbidden")
+        return user
+    return _checker
+
+
+def require_login():
+    """Require the current user to be logged in (any authenticated user)."""
+    def _checker(request: Request):
+        user = get_current_user(request)
+        if not user:
+            raise HTTPException(status_code=401, detail="Unauthorized")
         return user
     return _checker
 
@@ -689,14 +858,25 @@ def _apply_auth_state(request: Request, state: Dict[str, Any]) -> None:
 
 
 def _delete_session_cookie(response: Any) -> None:
-    if hasattr(response, "delete_cookie"):
-        response.delete_cookie(
-            SESSION_COOKIE_NAME,
-            path="/",
-            samesite="strict",
-            secure=True,
-            httponly=True,
-        )
+    """Delete session cookie from response, with safe handling for streaming responses."""
+    try:
+        # Try to delete using the standard method for regular responses
+        if hasattr(response, "delete_cookie"):
+            response.delete_cookie(
+                SESSION_COOKIE_NAME,
+                path="/",
+                samesite="strict",
+                secure=True,
+                httponly=True,
+            )
+        # Fallback for streaming/special responses: manipulate headers directly
+        elif hasattr(response, "headers"):
+            response.headers.append(
+                "Set-Cookie",
+                f"{SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=strict; Secure; HttpOnly"
+            )
+    except Exception as e:
+        logger.warning(f"Failed to delete session cookie: {e}", exc_info=False)
 
 
 def _authenticate_with_bearer_token(
@@ -1077,6 +1257,7 @@ async def login_page(request: Request):
 
 
 @app.post("/login")
+@limiter.limit("5/minute")
 async def login(
     request: Request,
     username: Optional[str] = Form(None),
@@ -1133,6 +1314,7 @@ async def login(
 
 
 @app.post("/api/login")
+@limiter.limit("5/minute")
 async def api_login(payload: LoginRequest, conn: sqlite3.Connection = Depends(get_db)):
     """API login: issue JWT token."""
     user = authenticate_credentials(conn, payload.username, payload.password)
@@ -1812,7 +1994,8 @@ async def admin_settings_page(
                 break
     if default_user_id is None and permission_matrix_users:
         default_user_id = permission_matrix_users[0]["id"]
-    permission_matrix_users_json = json.dumps(permission_matrix_users).replace("<", "\\u003c")
+    # Use json.dumps() without manual escaping; let Jinja2 template handle proper escaping
+    permission_matrix_users_json = json.dumps(permission_matrix_users)
 
     message = query_param(request, "message")
     error = query_param(request, "error")
@@ -2038,13 +2221,16 @@ async def api_monitor_live(
         return _collect_monitor_live_metrics()
     except RuntimeError as e:
         logger.error(f"Monitor metrics unavailable: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Monitor metrics unavailable")
     except Exception as e:
         logger.error(f"Error collecting monitor metrics: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while collecting metrics")
 
 @app.get("/api/generators")
-async def api_generators(conn: sqlite3.Connection = Depends(get_db)):
+async def api_generators(
+    _: Any = Depends(require_login()),
+    conn: sqlite3.Connection = Depends(get_db)
+):
     """Get all generators."""
     try:
         gen_repo = GeneratorRepository(conn)
@@ -2062,13 +2248,14 @@ async def api_generators(conn: sqlite3.Connection = Depends(get_db)):
         ]
     except Exception as e:
         logger.error(f"Error fetching generators: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while fetching generators")
 
 
 @app.get("/api/generators/{generator_id}/bookings")
 async def api_generator_bookings(
     generator_id: str,
     date: Optional[str] = None,
+    _: Any = Depends(require_login()),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Get bookings for a generator (optionally filtered by date)."""
@@ -2095,7 +2282,7 @@ async def api_generator_bookings(
         raise
     except Exception as e:
         logger.error(f"Error fetching generator bookings: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while fetching bookings")
 
 
 @app.post("/api/generators")
@@ -2172,11 +2359,14 @@ async def api_create_generator(
         raise
     except Exception as e:
         logger.error(f"Error creating generator: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while creating the generator")
 
 
 @app.get("/api/vendors")
-async def api_vendors(conn: sqlite3.Connection = Depends(get_db)):
+async def api_vendors(
+    _: Any = Depends(require_login()),
+    conn: sqlite3.Connection = Depends(get_db)
+):
     """Get all vendors."""
     try:
         vendor_repo = VendorRepository(conn)
@@ -2192,11 +2382,15 @@ async def api_vendors(conn: sqlite3.Connection = Depends(get_db)):
         ]
     except Exception as e:
         logger.error(f"Error fetching vendors: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while fetching vendors")
 
 
 @app.get("/api/vendors/{vendor_id}/bookings")
-async def api_vendor_bookings(vendor_id: str, conn: sqlite3.Connection = Depends(get_db)):
+async def api_vendor_bookings(
+    vendor_id: str,
+    _: Any = Depends(require_login()),
+    conn: sqlite3.Connection = Depends(get_db)
+):
     """Get all bookings (all statuses) for a specific vendor."""
     try:
         vendor_repo = VendorRepository(conn)
@@ -2277,11 +2471,14 @@ async def api_vendor_bookings(vendor_id: str, conn: sqlite3.Connection = Depends
         raise
     except Exception as e:
         logger.error(f"Error fetching vendor bookings: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while fetching vendor bookings")
 
 
 @app.get("/api/bookings")
-async def api_bookings(conn: sqlite3.Connection = Depends(get_db)):
+async def api_bookings(
+    _: Any = Depends(require_login()),
+    conn: sqlite3.Connection = Depends(get_db)
+):
     """Get all bookings."""
     try:
         booking_repo = BookingRepository(conn)
@@ -2297,7 +2494,7 @@ async def api_bookings(conn: sqlite3.Connection = Depends(get_db)):
         ]
     except Exception as e:
         logger.error(f"Error fetching bookings: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while fetching bookings")
 
 
 @app.get("/api/billing/lines")
@@ -2351,11 +2548,14 @@ async def api_billing_lines(
         raise
     except Exception as e:
         logger.error(f"Error fetching billing lines: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while fetching billing lines")
 
 
 @app.get("/api/calendar/events")
-async def api_calendar_events(conn: sqlite3.Connection = Depends(get_db)):
+async def api_calendar_events(
+    _: Any = Depends(require_login()),
+    conn: sqlite3.Connection = Depends(get_db)
+):
     """Calendar events aggregated by date (confirmed bookings only)."""
     try:
         booking_repo = BookingRepository(conn)
@@ -2373,11 +2573,15 @@ async def api_calendar_events(conn: sqlite3.Connection = Depends(get_db)):
         return events
     except Exception as e:
         logger.error(f"Error fetching calendar events: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while fetching calendar events")
 
 
 @app.get("/api/calendar/day")
-async def api_calendar_day(date: str, conn: sqlite3.Connection = Depends(get_db)):
+async def api_calendar_day(
+    date: str,
+    _: Any = Depends(require_login()),
+    conn: sqlite3.Connection = Depends(get_db)
+):
     """Get vendor bookings for a given date (confirmed only)."""
     try:
         try:
@@ -2429,7 +2633,7 @@ async def api_calendar_day(date: str, conn: sqlite3.Connection = Depends(get_db)
         raise
     except Exception as e:
         logger.error(f"Error fetching calendar day detail: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while fetching calendar day details")
 
 
 @app.post("/api/vendors")
@@ -2533,7 +2737,7 @@ async def api_update_vendor(
         raise
     except Exception as e:
         logger.error(f"Error updating vendor: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while updating the vendor")
 
 
 @app.delete("/api/vendors/{vendor_id}")
@@ -2574,7 +2778,7 @@ async def api_delete_vendor(
         raise
     except Exception as e:
         logger.error(f"Error deleting vendor: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while deleting the vendor")
 
 
 @app.post("/api/bookings")
@@ -2626,21 +2830,25 @@ async def api_create_booking(
         }
     except ValueError as e:
         logger.warning(f"Validation error creating booking: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail="Invalid booking data provided")
     except Exception as e:
         logger.error(f"Error creating booking: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while creating the booking")
 
 
 @app.get("/api/bookings/{booking_id}")
-async def api_booking_detail(booking_id: str, conn: sqlite3.Connection = Depends(get_db)):
+async def api_booking_detail(
+    booking_id: str,
+    _: Any = Depends(require_login()),
+    conn: sqlite3.Connection = Depends(get_db)
+):
     """Get booking detail."""
     try:
         booking_repo = BookingRepository(conn)
         try:
             booking = ensure_booking(booking_repo, booking_id, message="Booking not found")
         except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            raise HTTPException(status_code=404, detail="Booking not found")
         
         items = booking_repo.get_items(booking_id)
         
@@ -2667,7 +2875,7 @@ async def api_booking_detail(booking_id: str, conn: sqlite3.Connection = Depends
         raise
     except Exception as e:
         logger.error(f"Error fetching booking detail: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while fetching booking details")
 
 
 @app.post("/api/bookings/{booking_id}/cancel")
@@ -2691,7 +2899,7 @@ async def api_cancel_booking(
         raise
     except Exception as e:
         logger.error(f"Error cancelling booking: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while cancelling the booking")
 
 
 @app.delete("/api/bookings/{booking_id}")
@@ -2707,7 +2915,7 @@ async def api_delete_booking(
         try:
             booking = ensure_booking(booking_repo, booking_id, message="Booking not found")
         except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            raise HTTPException(status_code=404, detail="Booking not found")
 
         items = booking_repo.get_items(booking_id)
         booking_repo.delete_with_items(booking_id)
@@ -2729,7 +2937,7 @@ async def api_delete_booking(
         raise
     except Exception as e:
         logger.error(f"Error deleting booking: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while deleting the booking")
 
 
 @app.post("/api/bookings/{booking_id}/items")
@@ -2750,7 +2958,7 @@ async def api_add_booking_item(
         try:
             ensure_booking(booking_repo, booking_id, message="Booking not found")
         except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            raise HTTPException(status_code=404, detail="Booking not found")
         
         generator_id = generator_id.strip() if generator_id else None
         if not generator_id and capacity_kva is None:
@@ -2774,12 +2982,12 @@ async def api_add_booking_item(
         return {"success": True, "message": message}
     except ValueError as e:
         logger.warning(f"Validation error adding item: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail="Invalid item data provided")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error adding item to booking: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while adding the item")
 
 
 @app.post("/api/bookings/{booking_id}/items/bulk-update")
@@ -2796,7 +3004,7 @@ async def api_bulk_update_items(
         try:
             booking = ensure_booking(booking_repo, booking_id, message="Booking not found")
         except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            raise HTTPException(status_code=404, detail="Booking not found")
 
         updates_raw = request_data.get("updates", [])
         removes_raw = request_data.get("removes", [])
@@ -2919,7 +3127,7 @@ async def api_bulk_update_items(
         raise
     except Exception as e:
         logger.error(f"Error updating items: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while updating items")
 
 
 @app.get("/api/export")
@@ -2938,4 +3146,4 @@ async def api_export(
         }
     except Exception as e:
         logger.error(f"Error exporting data: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An error occurred while exporting data")
