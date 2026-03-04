@@ -1315,7 +1315,11 @@ async def login(
 
 @app.post("/api/login")
 @limiter.limit("5/minute")
-async def api_login(payload: LoginRequest, conn: sqlite3.Connection = Depends(get_db)):
+async def api_login(
+    request: Request,
+    payload: LoginRequest,
+    conn: sqlite3.Connection = Depends(get_db)
+):
     """API login: issue JWT token."""
     user = authenticate_credentials(conn, payload.username, payload.password)
     if not user:
