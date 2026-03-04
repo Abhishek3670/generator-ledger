@@ -30,7 +30,7 @@ ROLE_OPERATOR = "operator"
 # Web Server Configuration
 HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "8000"))
-DEBUG = os.getenv("DEBUG", "True").lower() == "true"
+DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
 # Application Configuration
 APP_TITLE = "Generator Booking Ledger"

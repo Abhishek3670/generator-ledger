@@ -13,13 +13,19 @@ services:
       - ./ledger.db:/app/ledger.db
     environment:
       - DB_PATH=/app/ledger.db
-      - HOST=0.0.0.0
-      - PORT=8000
-      - DEBUG=False
-      - SESSION_SECRET=yjMzyuB38DXJBdunx2jUG5yDsIVBUwR9d141DEI2PUx1TTVy2wkwdhmeZf6TzgoL
-      - OWNER_USERNAME=owner
-      - OWNER_PASSWORD=Qwerty@345
-      - LOAD_SEED_DATA=false
+      - HOST=${HOST:-0.0.0.0}
+      - PORT=${PORT:-8000}
+      - DEBUG=${DEBUG:-false}
+      - SESSION_SECRET=${SESSION_SECRET:?SESSION_SECRET not set}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET not set}
+      - OWNER_USERNAME=${OWNER_USERNAME:?OWNER_USERNAME not set}
+      - OWNER_PASSWORD=${OWNER_PASSWORD:?OWNER_PASSWORD not set}
+      - LOAD_SEED_DATA=${LOAD_SEED_DATA:-false}
+      - SESSION_COOKIE_NAME=${SESSION_COOKIE_NAME:-gbl_session}
+      - SESSION_TTL_MINUTES=${SESSION_TTL_MINUTES:-480}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+    env_file:
+      - .env
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]

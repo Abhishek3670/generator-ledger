@@ -609,8 +609,8 @@ def set_session_cookie(response: RedirectResponse, session_id: str, expires_at: 
         value=session_id,
         max_age=max_age,
         httponly=True,
-        secure=not DEBUG,
-        samesite="lax",
+        secure=True,
+        samesite="strict",
         path="/",
     )
 
@@ -620,8 +620,8 @@ def clear_session_cookie(response: RedirectResponse | JSONResponse | HTMLRespons
         key=SESSION_COOKIE_NAME,
         path="/",
         httponly=True,
-        secure=not DEBUG,
-        samesite="lax",
+        secure=True,
+        samesite="strict",
     )
 
 
@@ -698,8 +698,8 @@ def _delete_session_cookie(response: Any) -> None:
         response.delete_cookie(
             SESSION_COOKIE_NAME,
             path="/",
-            samesite="lax",
-            secure=not DEBUG,
+            samesite="strict",
+            secure=True,
             httponly=True,
         )
 
@@ -780,6 +780,31 @@ def _authenticate_with_session_cookie(
         "csrf_token": session.csrf_token,
         "session_id": session.session_id,
     }, clear_cookie
+
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Add security headers to all responses."""
+    response = await call_next(request)
+    # Prevent clickjacking attacks
+    response.headers["X-Frame-Options"] = "DENY"
+    # Prevent MIME type sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # Enable XSS protection
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    # Enforce HTTPS (max-age: 1 year)
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # Content Security Policy - allow Tailwind CDN, Google Fonts, FullCalendar, and inline styles/scripts
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com https://cdn.jsdelivr.net; "
+        "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self'"
+    )
+    return response
 
 
 @app.middleware("http")
