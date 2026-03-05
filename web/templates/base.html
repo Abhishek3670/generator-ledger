@@ -13,19 +13,58 @@
     {% block head %}{% endblock %}
 </head>
 <body>
-    <nav class="sticky top-0 z-50 border-b border-slate-200/60 bg-slate-900/95 text-white shadow-sm backdrop-blur">
+    <nav class="sticky top-0 z-50 border-b border-slate-200/60 bg-slate-900/95 text-white shadow-sm backdrop-blur" role="navigation" aria-label="Main navigation">
         <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-4" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
-            <a href="/" class="flex items-center gap-3 text-lg font-semibold tracking-wide">
-                <span class="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-sm font-bold">G</span>
-                <span>Genset</span>
+            <!-- Brand/Logo -->
+            <a href="/" class="flex items-center gap-3 text-lg font-semibold tracking-wide" aria-label="Genset Dashboard">
+                <span class="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-sm font-bold" aria-hidden="true">G</span>
+                <span class="hidden sm:inline">Genset</span>
             </a>
+
             {% set current_path = request.url.path %}
+
+            <!-- Main Navigation Links (visible on sm+, except on home page) -->
+            {% if user and not current_path == '/' %}
+            <div class="hidden items-center gap-1 sm:flex">
+                <a href="/bookings"
+                   class="px-3 py-2 text-xs font-semibold text-white/80 transition hover:text-white
+                          border-b-2 {{ 'border-amber-400' if current_path.startswith('/bookings') else 'border-transparent hover:border-white/30' }}"
+                   {% if current_path.startswith('/bookings') %}aria-current="page"{% endif %}>
+                    Bookings
+                </a>
+                <a href="/vendors"
+                   class="px-3 py-2 text-xs font-semibold text-white/80 transition hover:text-white
+                          border-b-2 {{ 'border-amber-400' if current_path.startswith('/vendors') else 'border-transparent hover:border-white/30' }}"
+                   {% if current_path.startswith('/vendors') %}aria-current="page"{% endif %}>
+                    Vendors
+                </a>
+                <a href="/generators"
+                   class="px-3 py-2 text-xs font-semibold text-white/80 transition hover:text-white
+                          border-b-2 {{ 'border-amber-400' if current_path.startswith('/generators') else 'border-transparent hover:border-white/30' }}"
+                   {% if current_path.startswith('/generators') %}aria-current="page"{% endif %}>
+                    Generators
+                </a>
+            </div>
+            {% endif %}
+
+            <!-- Right Section: Create Booking + User Menu -->
             <div class="flex items-center gap-3 overflow-x-auto whitespace-nowrap px-2 py-1 sm:overflow-visible sm:whitespace-normal">
                 {% if user %}
-                    <a href="/create-booking" class="rounded-full bg-amber-400 px-3 py-1.5 text-xs font-semibold text-amber-950 shadow-sm transition hover:bg-amber-300">Create Booking</a>
+                    <a href="/create-booking"
+                       class="rounded-full bg-amber-400 px-3 py-1.5 text-xs font-semibold text-amber-950 shadow-sm transition hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:ring-offset-2 focus:ring-offset-slate-900"
+                       title="Create a new booking">
+                        + Booking
+                    </a>
+
+                    <!-- User Menu -->
                     <div class="relative">
-                        <button id="userMenuButton" type="button" class="flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90 focus:outline-none">
-                            <span class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">
+                        <button id="userMenuButton"
+                                type="button"
+                                class="flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90 transition focus:outline-none focus:ring-2 focus:ring-amber-400"
+                                aria-label="User menu"
+                                aria-expanded="false"
+                                aria-controls="userMenu">
+                            <span class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-xs font-semibold" aria-hidden="true">
                                 {{ user.username[:2] | upper }}
                             </span>
                             <div class="text-left">
@@ -33,18 +72,48 @@
                                 <div class="text-[10px] uppercase tracking-[0.2em] text-white/60">{{ user.role }}</div>
                             </div>
                         </button>
-                        <div id="userMenu" class="absolute right-0 mt-2 w-48 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 shadow-lg overflow-hidden hidden">
-                            <a href="/billing" class="block px-4 py-2 hover:bg-slate-100 {{ 'text-slate-900 font-semibold' if current_path.startswith('/billing') else 'text-slate-700' }}">Billing</a>
-                            <a href="/history" class="block px-4 py-2 hover:bg-slate-100 {{ 'text-slate-900 font-semibold' if current_path.startswith('/history') else 'text-slate-700' }}">History</a>
+
+                        <div id="userMenu"
+                             role="menu"
+                             class="absolute right-0 mt-2 w-48 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 shadow-lg overflow-hidden hidden">
+                            <a href="/billing"
+                               role="menuitem"
+                               class="block px-4 py-2 hover:bg-slate-100 transition
+                                      {{ 'text-slate-900 font-semibold' if current_path.startswith('/billing') else 'text-slate-700' }}"
+                               {% if current_path.startswith('/billing') %}aria-current="page"{% endif %}>
+                                Billing
+                            </a>
+                            <a href="/history"
+                               role="menuitem"
+                               class="block px-4 py-2 hover:bg-slate-100 transition
+                                      {{ 'text-slate-900 font-semibold' if current_path.startswith('/history') else 'text-slate-700' }}"
+                               {% if current_path.startswith('/history') %}aria-current="page"{% endif %}>
+                                History
+                            </a>
                             {% if user.role == 'admin' %}
-                            <a href="/admin/settings" class="block px-4 py-2 hover:bg-slate-100 {{ 'text-slate-900 font-semibold' if current_path.startswith('/admin/settings') else 'text-slate-700' }}">Settings</a>
+                            <a href="/admin/settings"
+                               role="menuitem"
+                               class="block px-4 py-2 hover:bg-slate-100 transition
+                                      {{ 'text-slate-900 font-semibold' if current_path.startswith('/admin/settings') else 'text-slate-700' }}"
+                               {% if current_path.startswith('/admin/settings') %}aria-current="page"{% endif %}>
+                                Settings
+                            </a>
                             {% endif %}
-                            <a href="/logout?csrf_token={{ csrf_token }}" class="block px-4 py-2 hover:bg-slate-100 text-slate-700">Logout</a>
+                            <hr class="my-1 border-slate-200">
+                            <a href="/logout?csrf_token={{ csrf_token }}"
+                               role="menuitem"
+                               class="block px-4 py-2 text-slate-700 hover:bg-slate-100 transition">
+                                Logout
+                            </a>
                         </div>
                     </div>
                 {% else %}
-                    <a href="/login" class="border-b-2 border-transparent pb-1 flex items-center gap-2 rounded-full border-white/20 px-3 py-1.5 text-sm font-medium text-white/90 transition hover:border-white/50 hover:text-white {{ 'border-white/80 text-white' if current_path.startswith('/login') else '' }}">
-                        <span class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">GS</span>
+                    <a href="/login"
+                       class="flex items-center gap-2 rounded-full border-2 px-3 py-1.5 text-sm font-medium text-white/90 transition
+                              {{ 'border-amber-400 text-white' if current_path.startswith('/login') else 'border-white/20 hover:border-white/50 hover:text-white' }}
+                              focus:outline-none focus:ring-2 focus:ring-amber-400"
+                       {% if current_path.startswith('/login') %}aria-current="page"{% endif %}>
+                        <span class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-xs font-semibold" aria-hidden="true">GS</span>
                         Login
                     </a>
                 {% endif %}
@@ -83,18 +152,42 @@
             const button = document.getElementById('userMenuButton');
             const menu = document.getElementById('userMenu');
             if (!button || !menu) return;
-            const toggle = () => menu.classList.toggle('hidden');
+
+            const updateAriaState = () => {
+                const isOpen = !menu.classList.contains('hidden');
+                button.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            };
+
+            const toggle = () => {
+                menu.classList.toggle('hidden');
+                updateAriaState();
+            };
+
             const close = (event) => {
                 if (!menu.classList.contains('hidden') && !menu.contains(event.target) && !button.contains(event.target)) {
                     menu.classList.add('hidden');
+                    updateAriaState();
                 }
             };
+
             button.addEventListener('click', (e) => {
                 e.stopPropagation();
                 toggle();
             });
+
             document.addEventListener('click', close);
-            window.addEventListener('blur', () => menu.classList.add('hidden'));
+            window.addEventListener('blur', () => {
+                menu.classList.add('hidden');
+                updateAriaState();
+            });
+
+            // Close menu when clicking menu items
+            menu.querySelectorAll('a').forEach(link => {
+                link.addEventListener('click', () => {
+                    menu.classList.add('hidden');
+                    updateAriaState();
+                });
+            });
         })();
     </script>
     <script src="/static/js/main.js"></script>

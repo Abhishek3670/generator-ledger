@@ -44,8 +44,24 @@
 {% block content %}
 <div class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100">
     <div class="mx-auto max-w-6xl px-4 py-10 lg:py-12 [animation:fadeUp_0.6s_ease-out]" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
+        <!-- Mobile sidebar toggle button (visible only on small screens) -->
+        <button id="sidebarToggleBtn"
+                type="button"
+                class="mb-4 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 lg:hidden"
+                aria-label="Toggle navigation sidebar"
+                aria-expanded="false"
+                aria-controls="dashboardSidebar">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+            </svg>
+            Navigation
+        </button>
+
         <div class="grid gap-6 lg:grid-cols-[260px_1fr]">
-            <aside class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm [animation:fadeUp_0.6s_ease-out_0.05s_both] lg:sticky lg:top-24">
+            <!-- Sidebar: hidden on mobile, visible on lg+ -->
+            <aside id="dashboardSidebar"
+                   class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm
+                          lg:block lg:sticky lg:top-24 [animation:fadeUp_0.6s_ease-out_0.05s_both]">
                 <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Actions</div>
                 <div class="mt-4 space-y-3">
                     <a href="/bookings" class="action-link group flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 text-slate-900 transition hover:border-slate-300 hover:bg-slate-50">
@@ -138,10 +154,10 @@
                 <div id="overlayDate" class="mt-1 text-lg font-semibold text-slate-900"></div>
             </div>
             <div class="flex items-center gap-2">
-                <button id="downloadOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                <button id="downloadOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-200">
                     Download
                 </button>
-                <button id="closeOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                <button id="closeOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-200">
                     Close
                 </button>
             </div>
@@ -288,5 +304,54 @@
             });
         }
     })();
+</script>
+
+<!-- Mobile Sidebar Toggle Script -->
+<script>
+(function() {
+    const toggleBtn = document.getElementById('sidebarToggleBtn');
+    const sidebar = document.getElementById('dashboardSidebar');
+
+    if (!toggleBtn || !sidebar) return;
+
+    function updateAriaState() {
+        const isVisible = !sidebar.classList.contains('hidden');
+        toggleBtn.setAttribute('aria-expanded', isVisible ? 'true' : 'false');
+    }
+
+    toggleBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        sidebar.classList.toggle('hidden');
+        updateAriaState();
+    });
+
+    // Close sidebar when clicking on a link
+    sidebar.querySelectorAll('a').forEach(link => {
+        link.addEventListener('click', function() {
+            sidebar.classList.add('hidden');
+            updateAriaState();
+        });
+    });
+
+    // Close sidebar when clicking outside of it (on mobile)
+    document.addEventListener('click', function(e) {
+        const isSmallScreen = window.innerWidth < 1024;
+        if (isSmallScreen && !sidebar.contains(e.target) && !toggleBtn.contains(e.target)) {
+            sidebar.classList.add('hidden');
+            updateAriaState();
+        }
+    });
+
+    // Handle window resize - show sidebar on large screens
+    window.addEventListener('resize', function() {
+        if (window.innerWidth >= 1024) {
+            sidebar.classList.remove('hidden');
+            updateAriaState();
+        }
+    });
+
+    // Initialize
+    updateAriaState();
+})();
 </script>
 {% endblock %}
