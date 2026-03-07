@@ -1,0 +1,154 @@
+IMPORTANT BOOKING READ QUERIES
+=============================
+
+These are the main read-side SQL queries for the bookings pages and related overlays.
+Replace named placeholders like :booking_id, :vendor_id, and :selected_date before running.
+
+
+1. All booking headers used to build the /bookings page
+------------------------------------------------------
+SELECT booking_id,
+       vendor_id,
+       created_at,
+       status
+FROM bookings
+ORDER BY created_at DESC;
+
+
+2. Vendor details for a booking header
+--------------------------------------
+SELECT vendor_id,
+       vendor_name,
+       vendor_place,
+       phone
+FROM vendors
+WHERE vendor_id = :vendor_id;
+
+
+3. Booking items with generator capacity for one booking
+--------------------------------------------------------
+SELECT bi.id,
+       bi.booking_id,
+       bi.generator_id,
+       g.capacity_kva,
+       bi.start_dt,
+       bi.end_dt,
+       bi.item_status,
+       bi.remarks
+FROM booking_items bi
+LEFT JOIN generators g ON g.generator_id = bi.generator_id
+WHERE bi.booking_id = :booking_id
+ORDER BY bi.start_dt ASC,
+         bi.id ASC;
+
+
+4. Flat vendor-booking rows used by /api/vendors/{vendor_id}/bookings
+---------------------------------------------------------------------
+SELECT b.booking_id,
+       b.status AS booking_status,
+       b.created_at,
+       bi.id AS item_id,
+       bi.generator_id,
+       g.capacity_kva,
+       bi.start_dt,
+       bi.end_dt,
+       bi.item_status,
+       bi.remarks
+FROM bookings b
+LEFT JOIN booking_items bi ON bi.booking_id = b.booking_id
+LEFT JOIN generators g ON g.generator_id = bi.generator_id
+WHERE b.vendor_id = :vendor_id
+ORDER BY b.created_at DESC,
+         b.booking_id DESC,
+         bi.start_dt ASC,
+         bi.id ASC;
+
+
+5. Direct full table read for the Bookings by Vendor screen
+-----------------------------------------------------------
+SELECT v.vendor_name,
+       v.vendor_id,
+       b.booking_id,
+       b.created_at,
+       b.status AS booking_status,
+       date(bi.start_dt) AS booked_date,
+       bi.generator_id,
+       g.capacity_kva,
+       bi.item_status,
+       bi.remarks
+FROM bookings b
+LEFT JOIN vendors v ON v.vendor_id = b.vendor_id
+LEFT JOIN booking_items bi ON bi.booking_id = b.booking_id
+LEFT JOIN generators g ON g.generator_id = bi.generator_id
+ORDER BY v.vendor_name ASC,
+         b.created_at DESC,
+         b.booking_id DESC,
+         bi.start_dt ASC,
+         bi.id ASC;
+
+
+6. Single booking header for overlay/detail reads
+-------------------------------------------------
+SELECT booking_id,
+       vendor_id,
+       created_at,
+       status
+FROM bookings
+WHERE booking_id = :booking_id;
+
+
+7. Raw booking items for one booking
+------------------------------------
+SELECT id,
+       booking_id,
+       generator_id,
+       start_dt,
+       end_dt,
+       item_status,
+       remarks
+FROM booking_items
+WHERE booking_id = :booking_id
+ORDER BY id ASC;
+
+
+8. Confirmed generator periods for conflict checking
+----------------------------------------------------
+SELECT bi.booking_id,
+       bi.start_dt,
+       bi.end_dt
+FROM booking_items bi
+JOIN bookings b ON bi.booking_id = b.booking_id
+WHERE bi.generator_id = :generator_id
+  AND bi.item_status = 'Confirmed'
+  AND b.status = 'Confirmed'
+ORDER BY bi.start_dt ASC,
+         bi.id ASC;
+
+-- To exclude the current booking while editing:
+-- add: AND bi.booking_id != :exclude_booking_id
+
+
+9. Confirmed booked generators for one calendar date
+----------------------------------------------------
+SELECT DISTINCT bi.generator_id
+FROM booking_items bi
+JOIN bookings b ON bi.booking_id = b.booking_id
+WHERE date(bi.start_dt) = :selected_date
+  AND bi.item_status = 'Confirmed'
+  AND b.status = 'Confirmed'
+ORDER BY bi.generator_id ASC;
+
+
+10. Booking history for one booking
+-----------------------------------
+SELECT event_time,
+       event_type,
+       booking_id,
+       vendor_id,
+       user,
+       summary,
+       details
+FROM booking_history
+WHERE booking_id = :booking_id
+ORDER BY event_time DESC,
+         id DESC;

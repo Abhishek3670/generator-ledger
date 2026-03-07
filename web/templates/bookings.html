@@ -19,7 +19,7 @@
                     <input
                         type="text"
                         id="bookingFilter"
-                        placeholder="Search vendor, booking ID, date, generator, status, created"
+                        placeholder="Search vendor, booking ID, date, generator, status"
                         class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
                     >
                 </div>
@@ -89,11 +89,6 @@
                                         <span class="ml-1 inline-block text-slate-400">↕</span>
                                     </th>
                                     <th class="px-4 py-3 text-center font-semibold">Status</th>
-                                    <th class="js-sort-header cursor-pointer select-none px-4 py-3 text-center font-semibold transition hover:bg-slate-100" data-sort-key="created" title="Click to sort by created date">
-                                        Created
-                                        <span class="ml-1 inline-block text-slate-400">↕</span>
-                                    </th>
-                                    <th class="px-4 py-3 text-center font-semibold">Action</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-slate-100 text-slate-700">
@@ -101,16 +96,17 @@
                                     {% for date_row in booking_block.date_rows %}
                                     {% set gensets_search = date_row.gensets | map(attribute='label') | join(' ') if date_row.gensets else 'No gensets' %}
                                     <tr
-                                        class="js-booking-row transition hover:bg-slate-50"
+                                        class="js-booking-row cursor-pointer transition hover:bg-slate-50 focus:bg-slate-50"
+                                        tabindex="0"
+                                        aria-label="View booking {{ booking_block.booking.booking_id }} for {{ date_row.date }}"
                                         data-vendor-name="{{ vendor_name }}"
                                         data-vendor-id="{{ vendor_data.vendor_id }}"
                                         data-booking-id="{{ booking_block.booking.booking_id }}"
                                         data-booked-date="{{ date_row.date }}"
                                         data-status-label="{{ date_row.status_label }}"
                                         data-status-tone="{{ date_row.status_tone }}"
-                                        data-created-at="{{ booking_block.booking.created_at }}"
                                         data-generators="{{ gensets_search }}"
-                                        data-search="{{ (vendor_name ~ ' ' ~ vendor_data.vendor_id ~ ' ' ~ booking_block.booking.booking_id ~ ' ' ~ date_row.date ~ ' ' ~ date_row.status_label ~ ' ' ~ booking_block.booking.created_at ~ ' ' ~ gensets_search) | lower }}"
+                                        data-search="{{ (vendor_name ~ ' ' ~ vendor_data.vendor_id ~ ' ' ~ booking_block.booking.booking_id ~ ' ' ~ date_row.date ~ ' ' ~ date_row.status_label ~ ' ' ~ gensets_search) | lower }}"
                                     >
                                         <td class="px-4 py-3 align-top">
                                             <div class="font-semibold text-slate-900">
@@ -149,22 +145,6 @@
                                             </span>
                                             {% endif %}
                                         </td>
-                                        {% if loop.first %}
-                                        <td rowspan="{{ booking_block.rowspan }}" class="js-booking-created-cell px-4 py-3 align-top text-center">{{ booking_block.booking.created_at }}</td>
-                                        <td rowspan="{{ booking_block.rowspan }}" class="js-booking-action-cell px-4 py-3 align-top text-center">
-                                            <div class="flex flex-wrap justify-center gap-2">
-                                                <button
-                                                    type="button"
-                                                    class="js-view-booking rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900"
-                                                    data-booking-id="{{ booking_block.booking.booking_id }}"
-                                                    data-vendor-name="{{ vendor_name }}"
-                                                    data-vendor-id="{{ vendor_data.vendor_id }}"
-                                                >
-                                                    View
-                                                </button>
-                                            </div>
-                                        </td>
-                                        {% endif %}
                                     </tr>
                                     {% endfor %}
                                 {% endfor %}
@@ -201,7 +181,7 @@
             </button>
         </div>
         <div class="space-y-4 px-6 py-5">
-            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Status</div>
                     <div id="overlayStatus" class="mt-2"></div>
@@ -213,6 +193,10 @@
                 <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Vendor ID</div>
                     <div id="overlayVendorId" class="mt-2 text-sm font-semibold text-slate-900">-</div>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Booked Date</div>
+                    <div id="overlayBookedDate" class="mt-2 text-sm font-semibold text-slate-900">-</div>
                 </div>
             </div>
 
@@ -262,6 +246,16 @@ function isValidIsoDate(value) {
 function sanitizeDate(value) {
     const trimmed = String(value ?? '').trim();
     return isValidIsoDate(trimmed) ? trimmed : '';
+}
+
+function extractBookedDateToken(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) {
+        return 'N/A';
+    }
+
+    const candidate = raw.split(' ')[0].trim();
+    return isValidIsoDate(candidate) ? candidate : 'N/A';
 }
 
 function readFiltersFromUrl() {
@@ -439,23 +433,7 @@ function applyBookingFilters({ syncUrl = true } = {}) {
         });
 
         bookingBlocks.forEach(block => {
-            const anchorRow = block.rows[0];
-            const createdCell = anchorRow.querySelector('.js-booking-created-cell');
-            const actionCell = anchorRow.querySelector('.js-booking-action-cell');
-
-            if (block.hasVisible) {
-                if (anchorRow.style.display === 'none') {
-                    anchorRow.style.display = '';
-                }
-                const visibleInBlock = block.rows.filter(row => row.style.display !== 'none').length;
-                const rowspan = Math.max(1, visibleInBlock);
-                if (createdCell) {
-                    createdCell.rowSpan = rowspan;
-                }
-                if (actionCell) {
-                    actionCell.rowSpan = rowspan;
-                }
-            } else {
+            if (!block.hasVisible) {
                 block.rows.forEach(row => {
                     row.style.display = 'none';
                 });
@@ -512,6 +490,7 @@ const overlayVendor = document.getElementById('overlayVendor');
 const overlayStatus = document.getElementById('overlayStatus');
 const overlayCreated = document.getElementById('overlayCreated');
 const overlayVendorId = document.getElementById('overlayVendorId');
+const overlayBookedDate = document.getElementById('overlayBookedDate');
 const overlayItems = document.getElementById('overlayItems');
 const closeBookingOverlayBtn = document.getElementById('closeBookingOverlay');
 const overlayModifyLink = document.getElementById('overlayModifyLink');
@@ -540,7 +519,7 @@ function renderOverlayItems(items) {
 
     const grouped = {};
     items.forEach(item => {
-        const bookedDate = item.start_dt ? item.start_dt.split(' ')[0] : 'N/A';
+        const bookedDate = extractBookedDateToken(item.start_dt);
         if (!grouped[bookedDate]) {
             grouped[bookedDate] = {
                 generators: [],
@@ -632,10 +611,16 @@ function hideBookingOverlay() {
     bookingOverlay.classList.remove('flex');
 }
 
-async function openBookingOverlay(button) {
-    const bookingId = button.getAttribute('data-booking-id') || '';
-    const vendorName = button.getAttribute('data-vendor-name') || '';
-    const vendorId = button.getAttribute('data-vendor-id') || '';
+function filterOverlayItemsByBookedDate(items, bookedDate) {
+    const selectedDate = extractBookedDateToken(bookedDate);
+    return (items || []).filter(item => extractBookedDateToken(item.start_dt) === selectedDate);
+}
+
+async function openBookingOverlay(source) {
+    const bookingId = source.getAttribute('data-booking-id') || '';
+    const bookedDate = source.getAttribute('data-booked-date') || '';
+    const vendorName = source.getAttribute('data-vendor-name') || '';
+    const vendorId = source.getAttribute('data-vendor-id') || '';
     if (!bookingId) return;
 
     overlayBookingId.textContent = bookingId;
@@ -643,6 +628,7 @@ async function openBookingOverlay(button) {
     overlayStatus.innerHTML = '<span class="text-sm text-slate-500">Loading...</span>';
     overlayCreated.textContent = '-';
     overlayVendorId.textContent = vendorId || '-';
+    overlayBookedDate.textContent = extractBookedDateToken(bookedDate);
     overlayItems.innerHTML = '<div class="text-sm text-slate-500">Loading booking details...</div>';
     if (overlayModifyLink) {
         overlayModifyLink.href = `/booking/${encodeURIComponent(bookingId)}/edit`;
@@ -663,10 +649,12 @@ async function openBookingOverlay(button) {
 
         const booking = payload.booking || {};
         const resolvedBookingId = booking.id || bookingId;
+        const filteredItems = filterOverlayItemsByBookedDate(payload.items || [], bookedDate);
         overlayBookingId.textContent = resolvedBookingId;
         overlayVendor.textContent = vendorName || booking.vendor_id || '-';
         overlayVendorId.textContent = booking.vendor_id || vendorId || '-';
         overlayCreated.textContent = booking.created_at || '-';
+        overlayBookedDate.textContent = extractBookedDateToken(bookedDate);
         if (overlayModifyLink) {
             overlayModifyLink.href = `/booking/${encodeURIComponent(resolvedBookingId)}/edit`;
         }
@@ -675,14 +663,30 @@ async function openBookingOverlay(button) {
                 ${escapeHtml(booking.status || 'N/A')}
             </span>
         `;
-        renderOverlayItems(payload.items || []);
+        renderOverlayItems(filteredItems);
     } catch (error) {
         overlayItems.innerHTML = '<div class="text-sm text-rose-700">Unable to load booking details.</div>';
     }
 }
 
-document.querySelectorAll('.js-view-booking').forEach(button => {
-    button.addEventListener('click', () => openBookingOverlay(button));
+document.querySelectorAll('.js-booking-row').forEach(row => {
+    row.addEventListener('click', event => {
+        if (event.target.closest('button, a, input, select, textarea, label')) {
+            return;
+        }
+        openBookingOverlay(row);
+    });
+
+    row.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+            return;
+        }
+        if (event.target.closest('button, a, input, select, textarea, label')) {
+            return;
+        }
+        event.preventDefault();
+        openBookingOverlay(row);
+    });
 });
 
 closeBookingOverlayBtn?.addEventListener('click', hideBookingOverlay);
@@ -756,16 +760,6 @@ document.querySelectorAll('.js-sort-header').forEach(header => {
                     return currentSort.direction === 'asc'
                         ? aValue.localeCompare(bValue)
                         : bValue.localeCompare(aValue);
-
-                case 'created':
-                    aValue = a.dataset.createdAt || '';
-                    bValue = b.dataset.createdAt || '';
-                    // Compare as dates (format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)
-                    const aCreated = new Date(aValue);
-                    const bCreated = new Date(bValue);
-                    return currentSort.direction === 'asc'
-                        ? aCreated - bCreated
-                        : bCreated - aCreated;
 
                 default:
                     return 0;
