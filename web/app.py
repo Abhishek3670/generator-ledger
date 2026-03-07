@@ -60,6 +60,23 @@ from core.auth import (
     create_access_token,
     decode_access_token,
 )
+from core.permissions import (
+    ALL_CAPABILITY_KEYS,
+    EDITABLE_CAPABILITY_KEYS,
+    PERMISSION_MATRIX_CAPABILITIES,
+    CAPABILITY_BILLING_ACCESS,
+    CAPABILITY_BOOKING_CREATE_UPDATE,
+    CAPABILITY_BOOKING_DELETE,
+    CAPABILITY_EXPORT_ACCESS,
+    CAPABILITY_GENERATOR_MANAGEMENT,
+    CAPABILITY_MONITOR_ACCESS,
+    CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS,
+    CAPABILITY_SETTINGS_USER_ADMIN,
+    CAPABILITY_VENDOR_MANAGEMENT,
+    resolve_configured_permissions,
+    resolve_effective_permissions,
+    role_default_permissions,
+)
 
 # Initialize logging
 from config import (
@@ -309,125 +326,10 @@ HISTORY_EVENT_ACTION_LABELS = {
     "booking_cancelled": "Genset Cancelled",
     "booking_deleted": "Genset Removed",
 }
-PERMISSION_MATRIX_CAPABILITIES = (
-    {
-        "key": "settings_user_admin",
-        "label": "Settings & User Admin",
-        "description": "Access settings and manage user accounts.",
-        "endpoint_refs": (
-            "GET /admin/settings",
-            "POST /admin/settings/users/create",
-            "POST /admin/settings/users/{user_id}/update",
-            "POST /admin/settings/users/{user_id}/password",
-            "POST /admin/settings/users/{user_id}/delete",
-        ),
-        "admin_allowed": True,
-        "operator_allowed": False,
-    },
-    {
-        "key": "monitor_access",
-        "label": "Monitor",
-        "description": "View live monitor metrics and health checks.",
-        "endpoint_refs": (
-            "GET /api/monitor/live",
-            "GET /health",
-            "GET /api/info",
-        ),
-        "admin_allowed": True,
-        "operator_allowed": False,
-    },
-    {
-        "key": "vendor_management",
-        "label": "Vendor Management",
-        "description": "Create, update, and delete vendors.",
-        "endpoint_refs": (
-            "POST /api/vendors",
-            "PATCH /api/vendors/{vendor_id}",
-            "DELETE /api/vendors/{vendor_id}",
-        ),
-        "admin_allowed": True,
-        "operator_allowed": False,
-    },
-    {
-        "key": "generator_management",
-        "label": "Generator Management",
-        "description": "Create generator records.",
-        "endpoint_refs": (
-            "POST /api/generators",
-        ),
-        "admin_allowed": True,
-        "operator_allowed": False,
-    },
-    {
-        "key": "booking_create_update",
-        "label": "Booking Create/Update",
-        "description": "Create bookings and manage booking items.",
-        "endpoint_refs": (
-            "POST /api/bookings",
-            "POST /api/bookings/{booking_id}/items",
-            "POST /api/bookings/{booking_id}/items/bulk-update",
-            "POST /api/bookings/{booking_id}/cancel",
-        ),
-        "admin_allowed": True,
-        "operator_allowed": True,
-    },
-    {
-        "key": "booking_delete",
-        "label": "Booking Delete",
-        "description": "Delete existing bookings.",
-        "endpoint_refs": (
-            "DELETE /api/bookings/{booking_id}",
-        ),
-        "admin_allowed": True,
-        "operator_allowed": False,
-    },
-    {
-        "key": "billing_access",
-        "label": "Billing Access",
-        "description": "Access billing pages and billing line APIs.",
-        "endpoint_refs": (
-            "GET /billing",
-            "GET /api/billing/lines",
-        ),
-        "admin_allowed": True,
-        "operator_allowed": False,
-    },
-    {
-        "key": "export_access",
-        "label": "Export",
-        "description": "Export data via API.",
-        "endpoint_refs": (
-            "GET /api/export",
-        ),
-        "admin_allowed": True,
-        "operator_allowed": False,
-    },
-    {
-        "key": "read_only_operational_views",
-        "label": "Read-only Operational Views",
-        "description": "View operational pages and read APIs.",
-        "endpoint_refs": (
-            "GET /",
-            "GET /bookings",
-            "GET /history",
-            "GET /vendors",
-            "GET /generators",
-            "GET /create-booking",
-            "GET /booking/{booking_id}",
-            "GET /booking/{booking_id}/edit",
-            "GET /api/bookings",
-            "GET /api/bookings/{booking_id}",
-            "GET /api/vendors",
-            "GET /api/vendors/{vendor_id}/bookings",
-            "GET /api/generators",
-            "GET /api/generators/{generator_id}/bookings",
-            "GET /api/calendar/events",
-            "GET /api/calendar/day",
-        ),
-        "admin_allowed": True,
-        "operator_allowed": True,
-    },
-)
+EMPTY_PERMISSION_MAP = {
+    capability_key: False
+    for capability_key in ALL_CAPABILITY_KEYS
+}
 
 # Exception handler for validation errors
 @app.exception_handler(RequestValidationError)
@@ -604,6 +506,7 @@ def template_context(request: Request, **kwargs: Any) -> Dict[str, Any]:
         "request": request,
         "user": getattr(request.state, "user", None),
         "csrf_token": getattr(request.state, "csrf_token", None),
+        "permissions": getattr(request.state, "permissions", dict(EMPTY_PERMISSION_MAP)),
     }
     context.update(kwargs)
     return context
@@ -629,6 +532,30 @@ def query_param(request: Request, key: str, default: Optional[str] = None) -> Op
         return request.query_params.get(key, default)
     except KeyError:
         return default
+
+
+def _load_effective_permissions(conn: sqlite3.Connection, user: Any) -> Dict[str, bool]:
+    if not user or getattr(user, "id", None) is None:
+        return dict(EMPTY_PERMISSION_MAP)
+
+    repo = UserRepository(conn)
+    overrides = repo.list_permission_overrides(int(user.id))
+    return resolve_effective_permissions(
+        str(getattr(user, "role", "") or ""),
+        bool(getattr(user, "is_active", False)),
+        overrides,
+    )
+
+
+def get_current_permissions(request: Request) -> Dict[str, bool]:
+    permissions = getattr(request.state, "permissions", None)
+    if isinstance(permissions, dict):
+        merged = dict(EMPTY_PERMISSION_MAP)
+        for capability_key in ALL_CAPABILITY_KEYS:
+            if capability_key in permissions:
+                merged[capability_key] = bool(permissions[capability_key])
+        return merged
+    return dict(EMPTY_PERMISSION_MAP)
 
 
 def unauthorized_response(request: Request, detail: str = "Unauthorized") -> JSONResponse | RedirectResponse:
@@ -674,19 +601,11 @@ async def validate_csrf(request: Request, expected_token: str) -> bool:
 
     content_type = request.headers.get("content-type", "").lower()
     if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
-        # Read once, then restore the body stream so downstream Form(...) parsing still works.
+        # Read once so the body is cached on the request. Starlette's cached
+        # request wrapper will replay the cached body for downstream form
+        # parsing, and its wrapped receive expects the next low-level message
+        # to be a disconnect rather than another synthetic http.request.
         raw_body = await request.body()
-
-        body_sent = False
-
-        async def receive() -> Dict[str, Any]:
-            nonlocal body_sent
-            if body_sent:
-                return {"type": "http.request", "body": b"", "more_body": False}
-            body_sent = True
-            return {"type": "http.request", "body": raw_body, "more_body": False}
-
-        request._receive = receive
 
         form_token: Optional[str] = None
         if "application/x-www-form-urlencoded" in content_type:
@@ -817,6 +736,17 @@ def require_role(*roles: str):
     return _checker
 
 
+def require_capability(capability_key: str):
+    """Require the current user to have a specific effective capability."""
+    def _checker(request: Request):
+        user = get_current_user(request)
+        permissions = get_current_permissions(request)
+        if not permissions.get(capability_key, False):
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return user
+    return _checker
+
+
 def require_login():
     """Require the current user to be logged in (any authenticated user)."""
     def _checker(request: Request):
@@ -847,6 +777,7 @@ def _initialize_auth_state(request: Request) -> None:
     request.state.csrf_token = None
     request.state.session_id = None
     request.state.token_jti = None
+    request.state.permissions = dict(EMPTY_PERMISSION_MAP)
 
 
 def _apply_auth_state(request: Request, state: Dict[str, Any]) -> None:
@@ -1008,6 +939,9 @@ async def db_auth_middleware(request: Request, call_next):
         else:
             session_auth_state, clear_cookie = _authenticate_with_session_cookie(request, conn)
             _apply_auth_state(request, session_auth_state)
+
+        if request.state.user:
+            request.state.permissions = _load_effective_permissions(conn, request.state.user)
 
         if request.state.user and request.state.auth_type == "session":
             if requires_csrf(request) and path not in CSRF_EXEMPT_PATHS:
@@ -1391,7 +1325,11 @@ async def api_logout(request: Request, conn: sqlite3.Connection = Depends(get_db
 # ============================================================================
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+async def index(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
+):
     """Main dashboard page."""
     try:
         booking_repo = BookingRepository(conn)
@@ -1422,7 +1360,11 @@ async def index(request: Request, conn: sqlite3.Connection = Depends(get_db)):
 
 
 @app.get("/generators", response_class=HTMLResponse)
-async def generators_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+async def generators_page(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
+):
     """Generators list page."""
     try:
         gen_repo = GeneratorRepository(conn)
@@ -1469,7 +1411,11 @@ async def generators_page(request: Request, conn: sqlite3.Connection = Depends(g
 
 
 @app.get("/vendors", response_class=HTMLResponse)
-async def vendors_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+async def vendors_page(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
+):
     """Vendors list page."""
     try:
         vendor_repo = VendorRepository(conn)
@@ -1484,7 +1430,11 @@ async def vendors_page(request: Request, conn: sqlite3.Connection = Depends(get_
 
 
 @app.get("/bookings", response_class=HTMLResponse)
-async def bookings_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+async def bookings_page(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
+):
     """Bookings list page."""
     try:
         booking_repo = BookingRepository(conn)
@@ -1523,7 +1473,7 @@ async def bookings_page(request: Request, conn: sqlite3.Connection = Depends(get
 @app.get("/billing", response_class=HTMLResponse)
 async def billing_page(
     request: Request,
-    _: Any = Depends(require_role(ROLE_ADMIN, ROLE_OPERATOR)),
+    _: Any = Depends(require_capability(CAPABILITY_BILLING_ACCESS)),
 ):
     """Billing preview page."""
     try:
@@ -1709,12 +1659,23 @@ def _build_permission_matrix_rows() -> List[Dict[str, Any]]:
             "endpoint_refs": list(row["endpoint_refs"]),
             "admin_allowed": bool(row["admin_allowed"]),
             "operator_allowed": bool(row["operator_allowed"]),
+            "editable": bool(row.get("editable", True)),
         })
     return rows
 
 
-def _resolve_effective_permission(role: str, is_active: bool, row: Dict[str, Any]) -> bool:
+def _resolve_effective_permission(
+    role: str,
+    is_active: bool,
+    row: Dict[str, Any],
+    overrides: Optional[Dict[str, bool]] = None,
+) -> bool:
     """Resolve effective access from role + active state for a matrix row."""
+    capability_key = str(row.get("key") or "").strip()
+    if capability_key:
+        permissions = resolve_effective_permissions(role, is_active, overrides or {})
+        return bool(permissions.get(capability_key, False))
+
     if not is_active:
         return False
 
@@ -1726,24 +1687,46 @@ def _resolve_effective_permission(role: str, is_active: bool, row: Dict[str, Any
     return False
 
 
-def _build_permission_matrix_users(users: List[Any]) -> List[Dict[str, Any]]:
+def _build_permission_matrix_users(
+    users: List[Any],
+    overrides_by_user: Optional[Dict[int, Dict[str, bool]]] = None,
+) -> List[Dict[str, Any]]:
     """Normalize settings users for client-side effective-permission rendering."""
     rows: List[Dict[str, Any]] = []
+    overrides_by_user = overrides_by_user or {}
     for user in users:
         user_id = getattr(user, "id", None)
         if user_id is None:
             continue
+        normalized_role = str(getattr(user, "role", "") or "").strip().lower()
+        is_active = bool(getattr(user, "is_active", False))
+        user_overrides = overrides_by_user.get(int(user_id), {})
+        configured_permissions = resolve_configured_permissions(
+            normalized_role,
+            user_overrides,
+        )
+        effective_permissions = resolve_effective_permissions(
+            normalized_role,
+            is_active,
+            user_overrides,
+        )
         rows.append({
             "id": int(user_id),
             "username": str(getattr(user, "username", "") or ""),
-            "role": str(getattr(user, "role", "") or "").strip().lower(),
-            "is_active": bool(getattr(user, "is_active", False)),
+            "role": normalized_role,
+            "is_active": is_active,
+            "configured_permissions": configured_permissions,
+            "effective_permissions": effective_permissions,
         })
     return rows
 
 
 @app.get("/history", response_class=HTMLResponse)
-async def history_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+async def history_page(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
+):
     """Booking history page."""
     try:
         history_repo = BookingHistoryRepository(conn)
@@ -1865,7 +1848,11 @@ async def history_page(request: Request, conn: sqlite3.Connection = Depends(get_
 
 
 @app.get("/create-booking", response_class=HTMLResponse)
-async def create_booking_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+async def create_booking_page(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
+):
     """Create booking page."""
     try:
         vendor_repo = VendorRepository(conn)
@@ -1889,7 +1876,12 @@ async def create_booking_page(request: Request, conn: sqlite3.Connection = Depen
 
 
 @app.get("/booking/{booking_id}", response_class=HTMLResponse)
-async def booking_detail_page(request: Request, booking_id: str, conn: sqlite3.Connection = Depends(get_db)):
+async def booking_detail_page(
+    request: Request,
+    booking_id: str,
+    conn: sqlite3.Connection = Depends(get_db),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
+):
     """Booking detail page."""
     try:
         booking_repo = BookingRepository(conn)
@@ -1929,7 +1921,12 @@ async def booking_detail_page(request: Request, booking_id: str, conn: sqlite3.C
 
 
 @app.get("/booking/{booking_id}/edit", response_class=HTMLResponse)
-async def edit_booking_page(request: Request, booking_id: str, conn: sqlite3.Connection = Depends(get_db)):
+async def edit_booking_page(
+    request: Request,
+    booking_id: str,
+    conn: sqlite3.Connection = Depends(get_db),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
+):
     """Edit booking page."""
     try:
         booking_repo = BookingRepository(conn)
@@ -1985,8 +1982,9 @@ async def admin_settings_page(
     """Admin settings page."""
     repo = UserRepository(conn)
     users = repo.list_all()
+    overrides_by_user = repo.list_permission_overrides_by_user()
     permission_matrix_rows = _build_permission_matrix_rows()
-    permission_matrix_users = _build_permission_matrix_users(users)
+    permission_matrix_users = _build_permission_matrix_users(users, overrides_by_user)
     current_user = getattr(request.state, "user", None)
 
     default_user_id: Optional[int] = None
@@ -1998,6 +1996,12 @@ async def admin_settings_page(
                 break
     if default_user_id is None and permission_matrix_users:
         default_user_id = permission_matrix_users[0]["id"]
+    default_user = None
+    if default_user_id is not None:
+        for user in permission_matrix_users:
+            if user["id"] == int(default_user_id):
+                default_user = user
+                break
     # Use json.dumps() without manual escaping; let Jinja2 template handle proper escaping
     permission_matrix_users_json = json.dumps(permission_matrix_users)
 
@@ -2014,6 +2018,7 @@ async def admin_settings_page(
             permission_matrix_users=permission_matrix_users,
             permission_matrix_users_json=permission_matrix_users_json,
             permission_matrix_default_user_id=default_user_id,
+            permission_matrix_default_user=default_user,
         )
     )
 
@@ -2167,6 +2172,51 @@ async def admin_reset_password(
     )
 
 
+@app.post("/admin/settings/users/{user_id}/permissions")
+@app.post("/admin/users/{user_id}/permissions")
+async def admin_update_user_permissions(
+    request: Request,
+    user_id: int,
+    conn: sqlite3.Connection = Depends(get_db),
+    _: Any = Depends(require_role(ROLE_ADMIN))
+):
+    """Persist per-user capability overrides for editable capabilities."""
+    from urllib.parse import quote
+
+    repo = UserRepository(conn)
+    user = repo.get_by_id(user_id)
+    if not user:
+        return RedirectResponse(
+            f"/admin/settings?error={quote('User not found')}",
+            status_code=303,
+        )
+
+    form = await request.form()
+    role_defaults = role_default_permissions(user.role)
+
+    with transaction(conn):
+        for capability_key in EDITABLE_CAPABILITY_KEYS:
+            desired_allowed = form.get(capability_key) == "1"
+            if desired_allowed == bool(role_defaults.get(capability_key, False)):
+                repo.delete_permission_override(
+                    user_id,
+                    capability_key,
+                    commit=False,
+                )
+            else:
+                repo.set_permission_override(
+                    user_id,
+                    capability_key,
+                    desired_allowed,
+                    commit=False,
+                )
+
+    return RedirectResponse(
+        f"/admin/settings?message={quote('Permissions updated successfully')}",
+        status_code=303,
+    )
+
+
 @app.post("/admin/settings/users/{user_id}/delete")
 @app.post("/admin/users/{user_id}/delete")
 async def admin_delete_user(
@@ -2215,7 +2265,7 @@ async def admin_delete_user(
 
 @app.get("/api/monitor/live")
 async def api_monitor_live(
-    _: Any = Depends(require_role(ROLE_ADMIN)),
+    _: Any = Depends(require_capability(CAPABILITY_MONITOR_ACCESS)),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     """Return live server monitor metrics for monitor tab."""
@@ -2232,7 +2282,7 @@ async def api_monitor_live(
 
 @app.get("/api/generators")
 async def api_generators(
-    _: Any = Depends(require_login()),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Get all generators."""
@@ -2259,7 +2309,7 @@ async def api_generators(
 async def api_generator_bookings(
     generator_id: str,
     date: Optional[str] = None,
-    _: Any = Depends(require_login()),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Get bookings for a generator (optionally filtered by date)."""
@@ -2292,7 +2342,7 @@ async def api_generator_bookings(
 @app.post("/api/generators")
 async def api_create_generator(
     request_data: CreateGeneratorRequest,
-    _: Any = Depends(require_role(ROLE_ADMIN)),
+    _: Any = Depends(require_capability(CAPABILITY_GENERATOR_MANAGEMENT)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Create a new generator with auto-generated ID."""
@@ -2368,7 +2418,7 @@ async def api_create_generator(
 
 @app.get("/api/vendors")
 async def api_vendors(
-    _: Any = Depends(require_login()),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Get all vendors."""
@@ -2392,7 +2442,7 @@ async def api_vendors(
 @app.get("/api/vendors/{vendor_id}/bookings")
 async def api_vendor_bookings(
     vendor_id: str,
-    _: Any = Depends(require_login()),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Get all bookings (all statuses) for a specific vendor."""
@@ -2480,7 +2530,7 @@ async def api_vendor_bookings(
 
 @app.get("/api/bookings")
 async def api_bookings(
-    _: Any = Depends(require_login()),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Get all bookings."""
@@ -2505,7 +2555,7 @@ async def api_bookings(
 async def api_billing_lines(
     from_date: str = Query(..., alias="from"),
     to_date: str = Query(..., alias="to"),
-    _: Any = Depends(require_role(ROLE_ADMIN, ROLE_OPERATOR)),
+    _: Any = Depends(require_capability(CAPABILITY_BILLING_ACCESS)),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     """Get billable booking lines by date range (confirmed records only)."""
@@ -2557,7 +2607,7 @@ async def api_billing_lines(
 
 @app.get("/api/calendar/events")
 async def api_calendar_events(
-    _: Any = Depends(require_login()),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Calendar events aggregated by date (confirmed bookings only)."""
@@ -2583,7 +2633,7 @@ async def api_calendar_events(
 @app.get("/api/calendar/day")
 async def api_calendar_day(
     date: str,
-    _: Any = Depends(require_login()),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Get vendor bookings for a given date (confirmed only)."""
@@ -2643,7 +2693,7 @@ async def api_calendar_day(
 @app.post("/api/vendors")
 async def api_create_vendor(
     request_data: CreateVendorRequest,
-    _: Any = Depends(require_role(ROLE_ADMIN)),
+    _: Any = Depends(require_capability(CAPABILITY_VENDOR_MANAGEMENT)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Create a new vendor with auto-generated ID."""
@@ -2685,7 +2735,7 @@ async def api_create_vendor(
 async def api_update_vendor(
     vendor_id: str,
     request_data: UpdateVendorRequest,
-    _: Any = Depends(require_role(ROLE_ADMIN)),
+    _: Any = Depends(require_capability(CAPABILITY_VENDOR_MANAGEMENT)),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     """Update vendor profile details."""
@@ -2747,7 +2797,7 @@ async def api_update_vendor(
 @app.delete("/api/vendors/{vendor_id}")
 async def api_delete_vendor(
     vendor_id: str,
-    _: Any = Depends(require_role(ROLE_ADMIN)),
+    _: Any = Depends(require_capability(CAPABILITY_VENDOR_MANAGEMENT)),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     """Delete a vendor when it is not referenced by any booking."""
@@ -2789,7 +2839,7 @@ async def api_delete_vendor(
 async def api_create_booking(
     request: Request,
     request_data: CreateBookingRequest,
-    _: Any = Depends(require_role(ROLE_ADMIN, ROLE_OPERATOR)),
+    _: Any = Depends(require_capability(CAPABILITY_BOOKING_CREATE_UPDATE)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Create a new booking with auto-generated ID and items.
@@ -2843,7 +2893,7 @@ async def api_create_booking(
 @app.get("/api/bookings/{booking_id}")
 async def api_booking_detail(
     booking_id: str,
-    _: Any = Depends(require_login()),
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Get booking detail."""
@@ -2887,7 +2937,7 @@ async def api_cancel_booking(
     request: Request,
     booking_id: str,
     reason: str = Form(default="Cancelled via web"),
-    _: Any = Depends(require_role(ROLE_ADMIN, ROLE_OPERATOR)),
+    _: Any = Depends(require_capability(CAPABILITY_BOOKING_CREATE_UPDATE)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Cancel a booking."""
@@ -2910,7 +2960,7 @@ async def api_cancel_booking(
 async def api_delete_booking(
     request: Request,
     booking_id: str,
-    _: Any = Depends(require_role(ROLE_ADMIN)),
+    _: Any = Depends(require_capability(CAPABILITY_BOOKING_DELETE)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Delete a booking completely."""
@@ -2953,7 +3003,7 @@ async def api_add_booking_item(
     start_dt: str = Form(...),
     end_dt: str = Form(...),
     remarks: str = Form(default=""),
-    _: Any = Depends(require_role(ROLE_ADMIN, ROLE_OPERATOR)),
+    _: Any = Depends(require_capability(CAPABILITY_BOOKING_CREATE_UPDATE)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Add a new generator to an existing booking."""
@@ -2999,7 +3049,7 @@ async def api_bulk_update_items(
     request: Request,
     booking_id: str,
     request_data: Dict[str, Any],
-    _: Any = Depends(require_role(ROLE_ADMIN, ROLE_OPERATOR)),
+    _: Any = Depends(require_capability(CAPABILITY_BOOKING_CREATE_UPDATE)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Update multiple booking items and remove items."""
@@ -3137,7 +3187,7 @@ async def api_bulk_update_items(
 @app.get("/api/export")
 async def api_export(
     conn: sqlite3.Connection = Depends(get_db),
-    _: Any = Depends(require_role(ROLE_ADMIN))
+    _: Any = Depends(require_capability(CAPABILITY_EXPORT_ACCESS))
 ):
     """Export data to CSV."""
     try:

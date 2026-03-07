@@ -84,7 +84,7 @@
                 <h1 class="mt-2 text-2xl font-semibold text-slate-900">Vendors</h1>
                 <p class="mt-1 text-sm text-slate-500">Manage partners and contact details.</p>
             </div>
-            {% if user and user.role == 'admin' %}
+            {% if permissions.get('vendor_management') %}
                 <button
                     class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
                     onclick="openAddVendorModal()"
@@ -127,9 +127,9 @@
                             <td class="px-6 py-4 font-semibold text-slate-900">{{ vendor.vendor_id }}</td>
                             <td class="px-6 py-4">{{ vendor.vendor_name }}</td>
                             <td class="px-6 py-4">{{ vendor.vendor_place or '-' }}</td>
-                            <td class="px-6 py-4 relative {% if user and user.role == 'admin' %}pr-40{% endif %}">
+                            <td class="px-6 py-4 relative {% if permissions.get('vendor_management') %}pr-40{% endif %}">
                                 <span>{{ vendor.phone or '-' }}</span>
-                                {% if user and user.role == 'admin' %}
+                                {% if permissions.get('vendor_management') %}
                                 <div class="vendor-row-actions" data-row-actions>
                                     <button type="button" class="vendor-row-action-btn js-open-edit-vendor">Modify</button>
                                     <button type="button" class="vendor-row-action-btn vendor-row-action-danger js-open-delete-vendor">Delete</button>
@@ -150,7 +150,7 @@
     </div>
 </div>
 
-{% if user and user.role == 'admin' %}
+{% if permissions.get('vendor_management') %}
 <div id="addVendorModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
     <div class="w-full max-w-lg rounded-2xl bg-white shadow-xl">
         <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">

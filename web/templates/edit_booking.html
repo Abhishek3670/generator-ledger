@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set can_update_booking = permissions.get('booking_create_update') %}
+{% set can_delete_booking = permissions.get('booking_delete') %}
 <div class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100">
     <div class="mx-auto max-w-6xl px-4 py-10 lg:py-12" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
         <div class="flex flex-wrap items-center justify-between gap-4">
@@ -68,7 +70,9 @@
                                 <th class="px-6 py-4 text-left font-semibold">Booked Date</th>
                                 <th class="px-6 py-4 text-left font-semibold">Status</th>
                                 <th class="px-6 py-4 text-left font-semibold">Remarks</th>
+                                {% if can_update_booking %}
                                 <th class="px-6 py-4 text-left font-semibold">Action</th>
+                                {% endif %}
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-100 text-slate-700">
@@ -76,7 +80,7 @@
                             <tr data-item-id="{{ item_info.item.id }}" class="transition hover:bg-slate-50">
                                 <td class="px-6 py-4 font-semibold text-slate-900">{{ item_info.generator_name }}</td>
                                 <td class="px-6 py-4">
-                                    <input type="date" class="booked-date w-44 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200" value="{{ item_info.item.start_dt.split(' ')[0] }}">
+                                    <input type="date" class="booked-date w-44 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200" value="{{ item_info.item.start_dt.split(' ')[0] }}" {% if not can_update_booking %}disabled{% endif %}>
                                 </td>
                                 <td class="px-6 py-4">
                                     <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold
@@ -86,11 +90,13 @@
                                     </span>
                                 </td>
                                 <td class="px-6 py-4">
-                                    <input type="text" class="remarks w-40 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200" value="{{ item_info.item.remarks or '' }}">
+                                    <input type="text" class="remarks w-40 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200" value="{{ item_info.item.remarks or '' }}" {% if not can_update_booking %}disabled{% endif %}>
                                 </td>
+                                {% if can_update_booking %}
                                 <td class="px-6 py-4">
                                     <button class="rounded-full bg-rose-500 px-3 py-1 text-xs font-semibold text-white transition hover:bg-rose-400" onclick="removeItem(this)">Remove</button>
                                 </td>
+                                {% endif %}
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -107,10 +113,13 @@
         <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Add Generator</div>
             <div class="mt-2 text-lg font-semibold text-slate-900">Add New Generator to Booking</div>
+            {% if not can_update_booking %}
+            <p class="mt-2 text-sm text-slate-500">You can review this booking, but generator assignment changes are not enabled for your account.</p>
+            {% endif %}
             <form id="addGeneratorForm" class="mt-4 grid gap-4">
                 <div>
                     <label for="newCapacity" class="text-sm font-semibold text-slate-700">Select Capacity (kVA)</label>
-                    <select id="newCapacity" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                    <select id="newCapacity" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200" {% if not can_update_booking %}disabled{% endif %}>
                         <option value="">-- Select a Capacity --</option>
                         {% for cap in capacities %}
                         <option value="{{ cap }}">{{ cap }} kVA</option>
@@ -120,20 +129,22 @@
 
                 <div>
                     <label for="newBookingDate" class="text-sm font-semibold text-slate-700">Booked Date</label>
-                    <input type="date" id="newBookingDate" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                    <input type="date" id="newBookingDate" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200" {% if not can_update_booking %}disabled{% endif %}>
                 </div>
 
                 <div>
                     <label for="newRemarks" class="text-sm font-semibold text-slate-700">Remarks (Optional)</label>
-                    <input type="text" id="newRemarks" placeholder="Enter any remarks..." class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                    <input type="text" id="newRemarks" placeholder="Enter any remarks..." class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200" {% if not can_update_booking %}disabled{% endif %}>
                 </div>
             </form>
         </section>
 
         <div class="mt-6 flex flex-wrap items-center gap-3">
+            {% if can_update_booking %}
             <button onclick="saveChanges()" class="rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-400">Save Changes</button>
             <button onclick="addNewGenerator()" class="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">Add Generator</button>
-            {% if user and user.role == 'admin' %}
+            {% endif %}
+            {% if can_delete_booking %}
             <button onclick="openDeleteBookingDialog()" class="rounded-full bg-rose-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500">Delete Booking</button>
             {% endif %}
             <a href="/bookings" class="rounded-full border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">Back to Bookings</a>
@@ -141,7 +152,7 @@
     </div>
 </div>
 
-{% if user and user.role == 'admin' %}
+{% if can_delete_booking %}
 <div id="deleteBookingDialog" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
     <div class="w-full max-w-md rounded-2xl bg-white shadow-xl">
         <div class="border-b border-slate-200 px-6 py-4">

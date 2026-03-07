@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import json
+import re
 import sys
 
 import pytest
@@ -56,6 +57,9 @@ def test_permission_matrix_rows_include_capabilities_and_endpoints(app_module_an
     ]
 
     assert all(isinstance(row["endpoint_refs"], list) and row["endpoint_refs"] for row in rows)
+    assert all(isinstance(row["editable"], bool) for row in rows)
+    settings_row = next(row for row in rows if row["key"] == "settings_user_admin")
+    assert settings_row["editable"] is False
     vendor_row = next(row for row in rows if row["key"] == "vendor_management")
     assert "PATCH /api/vendors/{vendor_id}" in vendor_row["endpoint_refs"]
 
@@ -97,12 +101,36 @@ def test_effective_permission_unknown_role_denied(app_module_and_conn):
     assert web_app_module._resolve_effective_permission("", True, row) is False
 
 
+def test_effective_permission_uses_override_payload_for_capability_rows(app_module_and_conn):
+    web_app_module, _conn = app_module_and_conn
+
+    row = {
+        "key": "billing_access",
+        "admin_allowed": True,
+        "operator_allowed": False,
+    }
+
+    assert web_app_module._resolve_effective_permission(
+        "operator",
+        True,
+        row,
+        overrides={"billing_access": True},
+    ) is True
+    assert web_app_module._resolve_effective_permission(
+        "admin",
+        True,
+        row,
+        overrides={"billing_access": False},
+    ) is False
+
+
 def test_admin_settings_context_includes_permission_matrix_payload(app_module_and_conn):
     web_app_module, conn = app_module_and_conn
     user_repo = UserRepository(conn)
 
     admin_id = user_repo.create_user("admin_user", "hash", "admin", is_active=True)
-    user_repo.create_user("operator_user", "hash", "operator", is_active=True)
+    operator_id = user_repo.create_user("operator_user", "hash", "operator", is_active=True)
+    user_repo.set_permission_override(operator_id, "billing_access", True)
     current_user = user_repo.get_by_id(admin_id)
 
     request = Request({"type": "http", "method": "GET", "path": "/admin/settings", "headers": []})
@@ -115,11 +143,78 @@ def test_admin_settings_context_includes_permission_matrix_payload(app_module_an
     assert "permission_matrix_rows" in context
     assert "permission_matrix_users" in context
     assert "permission_matrix_default_user_id" in context
+    assert "permission_matrix_default_user" in context
     assert context["permission_matrix_default_user_id"] == admin_id
+    assert context["permission_matrix_default_user"]["id"] == admin_id
 
     users = context["permission_matrix_users"]
-    assert users and all({"id", "username", "role", "is_active"} <= set(row.keys()) for row in users)
+    assert users and all(
+        {"id", "username", "role", "is_active", "configured_permissions", "effective_permissions"} <= set(row.keys())
+        for row in users
+    )
+    operator_row = next(row for row in users if row["id"] == operator_id)
+    assert operator_row["configured_permissions"]["billing_access"] is True
+    assert operator_row["effective_permissions"]["billing_access"] is True
 
     users_from_json = json.loads(context["permission_matrix_users_json"])
     assert users_from_json == users
 
+
+def test_admin_settings_renders_merged_permission_matrix_form(app_module_and_conn):
+    web_app_module, conn = app_module_and_conn
+    user_repo = UserRepository(conn)
+
+    admin_id = user_repo.create_user("admin_user", "hash", "admin", is_active=True)
+    user_repo.create_user("operator_user", "hash", "operator", is_active=False)
+    current_user = user_repo.get_by_id(admin_id)
+
+    request = Request({"type": "http", "method": "GET", "path": "/admin/settings", "headers": []})
+    request.state.user = current_user
+    request.state.csrf_token = "csrf-token"
+
+    response = asyncio.run(web_app_module.admin_settings_page(request, conn=conn, _=current_user))
+    html = response.body.decode()
+
+    assert 'id="permissionMatrixForm"' in html
+    assert 'action="/admin/settings/users/0/permissions"' in html
+    assert 'id="permissionEditorForm"' not in html
+    assert '<option value="" selected>Select a user</option>' in html
+    assert f'<option value="{admin_id}">' in html
+    assert 'data-selected-user-column-header' in html
+    assert 'data-permission-editor-checkbox' in html
+    assert 'data-selected-user-toggle' in html
+    assert 'data-selected-user-locked' in html
+    assert 'name="billing_access"' in html
+    assert 'data-initial-checked=' in html
+    assert 'bg-amber-200' in html
+    assert 'bg-slate-100' in html
+    assert "Configured" not in html
+    assert "Effective" not in html
+    assert "Fixed to Admin" not in html
+    assert 'data-effective-badge' not in html
+    assert 'data-inactive-effective-note' not in html
+    assert 'data-selected-user-cell' in html
+    assert 'border border-slate-300 p-0 text-center align-middle' in html
+    assert 'data-selected-user-toggle' in html
+    assert 'min-h-[4.75rem] w-full items-center justify-center border text-sm font-bold' in html
+    assert 'Select a user to view permissions.' in html
+    assert re.search(r'<button[^>]*data-selected-user-toggle[^>]*\sdisabled(?:\s|>)', html)
+
+
+def test_admin_settings_inactive_default_user_renders_denied_helper_text(app_module_and_conn):
+    web_app_module, conn = app_module_and_conn
+    user_repo = UserRepository(conn)
+
+    inactive_admin_id = user_repo.create_user("inactive_admin", "hash", "admin", is_active=False)
+    current_user = user_repo.get_by_id(inactive_admin_id)
+
+    request = Request({"type": "http", "method": "GET", "path": "/admin/settings", "headers": []})
+    request.state.user = current_user
+    request.state.csrf_token = "csrf-token"
+
+    response = asyncio.run(web_app_module.admin_settings_page(request, conn=conn, _=current_user))
+    html = response.body.decode()
+
+    assert response.context["permission_matrix_default_user"]["id"] == inactive_admin_id
+    assert "Select a user to view permissions." in html
+    assert re.search(r'<button[^>]*data-selected-user-toggle[^>]*\sdisabled(?:\s|>)', html)

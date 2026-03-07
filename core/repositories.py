@@ -851,6 +851,83 @@ class UserRepository:
         self.conn.commit()
         return int(cur.lastrowid)
 
+    def list_permission_overrides(self, user_id: int) -> Dict[str, bool]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT capability_key, is_allowed
+            FROM user_permission_overrides
+            WHERE user_id = ?
+            ORDER BY capability_key
+            """,
+            (user_id,),
+        )
+        return {
+            str(row[0]): bool(row[1])
+            for row in cur.fetchall()
+        }
+
+    def list_permission_overrides_by_user(self) -> Dict[int, Dict[str, bool]]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT user_id, capability_key, is_allowed
+            FROM user_permission_overrides
+            ORDER BY user_id, capability_key
+            """
+        )
+        grouped: Dict[int, Dict[str, bool]] = {}
+        for row in cur.fetchall():
+            user_id = int(row[0])
+            grouped.setdefault(user_id, {})[str(row[1])] = bool(row[2])
+        return grouped
+
+    def set_permission_override(
+        self,
+        user_id: int,
+        capability_key: str,
+        is_allowed: bool,
+        commit: bool = True,
+    ) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO user_permission_overrides (user_id, capability_key, is_allowed)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id, capability_key)
+            DO UPDATE SET is_allowed = excluded.is_allowed
+            """,
+            (user_id, capability_key, 1 if is_allowed else 0),
+        )
+        if commit:
+            self.conn.commit()
+
+    def delete_permission_override(
+        self,
+        user_id: int,
+        capability_key: str,
+        commit: bool = True,
+    ) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            DELETE FROM user_permission_overrides
+            WHERE user_id = ? AND capability_key = ?
+            """,
+            (user_id, capability_key),
+        )
+        if commit:
+            self.conn.commit()
+
+    def clear_permission_overrides(self, user_id: int, commit: bool = True) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            "DELETE FROM user_permission_overrides WHERE user_id = ?",
+            (user_id,),
+        )
+        if commit:
+            self.conn.commit()
+
     def update_role(self, user_id: int, role: str) -> None:
         cur = self.conn.cursor()
         cur.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))

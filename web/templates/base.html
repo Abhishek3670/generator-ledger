@@ -24,7 +24,7 @@
             {% set current_path = request.url.path %}
 
             <!-- Main Navigation Links (visible on sm+, except on home page) -->
-            {% if user and not current_path == '/' %}
+            {% if user and permissions.get('read_only_operational_views') and not current_path == '/' %}
             <div class="hidden items-center gap-1 sm:flex">
                 <a href="/bookings"
                    class="px-3 py-2 text-xs font-semibold text-white/80 transition hover:text-white
@@ -50,11 +50,13 @@
             <!-- Right Section: Create Booking + User Menu -->
             <div class="flex items-center gap-3 overflow-x-auto whitespace-nowrap px-2 py-1 sm:overflow-visible sm:whitespace-normal">
                 {% if user %}
+                    {% if permissions.get('read_only_operational_views') and permissions.get('booking_create_update') %}
                     <a href="/create-booking"
                        class="rounded-full bg-amber-400 px-3 py-1.5 text-xs font-semibold text-amber-950 shadow-sm transition hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:ring-offset-2 focus:ring-offset-slate-900"
                        title="Create a new booking">
                         + Booking
                     </a>
+                    {% endif %}
 
                     <!-- User Menu -->
                     <div class="relative">
@@ -76,6 +78,7 @@
                         <div id="userMenu"
                              role="menu"
                              class="absolute right-0 mt-2 w-48 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 shadow-lg overflow-hidden hidden">
+                            {% if permissions.get('billing_access') %}
                             <a href="/billing"
                                role="menuitem"
                                class="block px-4 py-2 hover:bg-slate-100 transition
@@ -83,6 +86,8 @@
                                {% if current_path.startswith('/billing') %}aria-current="page"{% endif %}>
                                 Billing
                             </a>
+                            {% endif %}
+                            {% if permissions.get('read_only_operational_views') %}
                             <a href="/history"
                                role="menuitem"
                                class="block px-4 py-2 hover:bg-slate-100 transition
@@ -90,6 +95,7 @@
                                {% if current_path.startswith('/history') %}aria-current="page"{% endif %}>
                                 History
                             </a>
+                            {% endif %}
                             {% if user.role == 'admin' %}
                             <a href="/admin/settings"
                                role="menuitem"

@@ -103,6 +103,14 @@ class DatabaseManager:
                 last_login TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS user_permission_overrides (
+                user_id INTEGER NOT NULL,
+                capability_key TEXT NOT NULL,
+                is_allowed INTEGER NOT NULL CHECK (is_allowed IN (0, 1)),
+                PRIMARY KEY (user_id, capability_key),
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -152,6 +160,9 @@ class DatabaseManager:
 
             CREATE INDEX IF NOT EXISTS idx_sessions_expires_at
                 ON sessions(expires_at);
+
+            CREATE INDEX IF NOT EXISTS idx_user_permission_overrides_user_id
+                ON user_permission_overrides(user_id);
 
             CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires_at
                 ON revoked_tokens(expires_at);
