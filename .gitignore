@@ -68,3 +68,4 @@ Backup/
 # Jupyter
 .ipynb_checkpoints/
 *.md
+*.txt
