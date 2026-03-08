@@ -1832,8 +1832,6 @@ async def history_page(
             generators_summary = ", ".join(
                 sorted({item["generator_id"] for item in items_structured})
             ) if items_structured else "-"
-            view_link = f"/booking/{booking_id}" if booking_id else None
-
             search_blob = " ".join(filter(None, [
                 summary,
                 event_action_label,
@@ -1862,7 +1860,6 @@ async def history_page(
                 "details_raw": details_raw,
                 "generators_summary": generators_summary,
                 "items_structured": items_structured,
-                "view_link": view_link,
                 "search_blob": search_blob,
                 "_event_dt": event_dt,
             })

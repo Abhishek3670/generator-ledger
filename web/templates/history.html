@@ -198,15 +198,6 @@
     .history-meta-sep {
         color: #cbd5e1;
     }
-    .history-view-link {
-        color: #0369a1;
-        font-weight: 600;
-        text-decoration: none;
-    }
-    .history-view-link:hover {
-        color: #075985;
-        text-decoration: underline;
-    }
     .history-toggle {
         margin-top: 0.55rem;
         border: 0;
@@ -270,17 +261,23 @@
     .history-item-list li:last-child {
         border-bottom: 0;
     }
-    .history-raw {
-        margin: 0;
+    .history-section {
         padding: 0.75rem;
-        font-size: 0.73rem;
-        line-height: 1.4;
-        white-space: pre-wrap;
-        word-break: break-word;
-        color: #334155;
-        background: #ffffff;
         border-top: 1px solid #e2e8f0;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        background: #ffffff;
+    }
+    .history-section-title {
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #64748b;
+    }
+    .history-section-copy {
+        margin-top: 0.25rem;
+        font-size: 0.78rem;
+        line-height: 1.5;
+        color: #334155;
     }
     .hidden {
         display: none !important;
@@ -405,10 +402,6 @@
                                             data-time-raw="{{ entry.event_time_raw }}"
                                             title="{{ entry.event_time_raw }}"
                                         >{{ entry.event_time_raw }}</span>
-                                        {% if entry.view_link %}
-                                        <span class="history-meta-sep">•</span>
-                                        <a href="{{ entry.view_link }}" class="history-view-link">View</a>
-                                        {% endif %}
                                     </div>
 
                                     <button
@@ -423,31 +416,35 @@
                                     <div id="history-details-{{ group.date_key }}-{{ loop.index0 }}" class="history-details hidden" data-history-details>
                                         <div class="history-details-grid">
                                             <div class="history-details-cell">
-                                                <div class="history-details-label">Event Type</div>
-                                                <div class="history-details-value">{{ entry.event_type or '-' }}</div>
+                                                <div class="history-details-label">What happened</div>
+                                                <div class="history-details-value">{{ entry.event_action_label or '-' }}</div>
                                             </div>
                                             <div class="history-details-cell">
-                                                <div class="history-details-label">User</div>
+                                                <div class="history-details-label">Changed by</div>
                                                 <div class="history-details-value">{{ entry.user or '-' }}</div>
                                             </div>
                                             <div class="history-details-cell">
-                                                <div class="history-details-label">Vendor</div>
+                                                <div class="history-details-label">Vendor name</div>
                                                 <div class="history-details-value">{{ entry.vendor_name or '-' }}</div>
                                             </div>
                                             <div class="history-details-cell">
-                                                <div class="history-details-label">Vendor ID</div>
+                                                <div class="history-details-label">Vendor reference</div>
                                                 <div class="history-details-value">{{ entry.vendor_id or '-' }}</div>
                                             </div>
                                             <div class="history-details-cell">
-                                                <div class="history-details-label">Booking ID</div>
+                                                <div class="history-details-label">Booking reference</div>
                                                 <div class="history-details-value">{{ entry.booking_id or '-' }}</div>
                                             </div>
                                             <div class="history-details-cell">
-                                                <div class="history-details-label">Generators</div>
+                                                <div class="history-details-label">Generators involved</div>
                                                 <div class="history-details-value">{{ entry.generators_summary or '-' }}</div>
                                             </div>
                                         </div>
 
+                                        <div class="history-section">
+                                            <div class="history-section-title">Generator schedule for this activity</div>
+                                            <div class="history-section-copy">The list below shows the generator units and dates captured for this history entry.</div>
+                                        </div>
                                         {% if entry.items_structured %}
                                         <ul class="history-item-list">
                                             {% for item in entry.items_structured %}
@@ -458,10 +455,8 @@
                                             {% endfor %}
                                         </ul>
                                         {% else %}
-                                        <div class="px-3 py-2 text-xs text-slate-500">No parsed generator items available.</div>
+                                        <div class="px-3 py-3 text-xs text-slate-500">No generator schedule details were captured for this activity.</div>
                                         {% endif %}
-
-                                        <pre class="history-raw">{{ entry.details_raw or '-' }}</pre>
                                     </div>
                                 </div>
                             </article>

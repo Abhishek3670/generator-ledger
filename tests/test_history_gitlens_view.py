@@ -106,7 +106,7 @@ def test_history_extract_items_parsing_and_fallback(app_module_and_conn):
     assert web_app_module._history_extract_items("") == []
 
 
-def test_history_page_includes_view_link_when_booking_id_exists(app_module_and_conn):
+def test_history_page_uses_user_friendly_details_without_view_link(app_module_and_conn):
     web_app_module, conn = app_module_and_conn
 
     vendor_repo = VendorRepository(conn)
@@ -164,9 +164,16 @@ def test_history_page_includes_view_link_when_booking_id_exists(app_module_and_c
 
     groups = response.context["history_groups"]
     entries = [entry for group in groups for entry in group["entries"]]
+    html = response.body.decode()
 
     with_booking = next(entry for entry in entries if entry["booking_id"] == "BKG-20260225-00001")
     without_booking = next(entry for entry in entries if not entry["booking_id"])
 
-    assert with_booking["view_link"] == "/booking/BKG-20260225-00001"
-    assert without_booking["view_link"] is None
+    assert "view_link" not in with_booking
+    assert "view_link" not in without_booking
+    assert "What happened" in html
+    assert "Changed by" in html
+    assert "Generator schedule for this activity" in html
+    assert "Technical details" not in html
+    assert "Stored audit data" not in html
+    assert ">View<" not in html
