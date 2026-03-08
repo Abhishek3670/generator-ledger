@@ -231,7 +231,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let bookingsAbortController = null;
     let lastResolvedVendorId = '';
-    let lastVendorBookingsPayload = null;
     let currentVendorBookingsView = null;
 
     function escapeHtml(value) {
@@ -342,20 +341,6 @@ document.addEventListener('DOMContentLoaded', function() {
             : 'Existing bookings';
     }
 
-    function getSelectedBookingDates() {
-        if (!picker || !Array.isArray(picker.selectedDates) || picker.selectedDates.length === 0) {
-            return [];
-        }
-        return picker.selectedDates
-            .map(date => picker.formatDate(date, 'Y-m-d'))
-            .sort();
-    }
-
-    function rerenderVendorBookingsFromCache() {
-        if (!lastResolvedVendorId || !lastVendorBookingsPayload) return;
-        renderVendorBookings(lastVendorBookingsPayload);
-    }
-
     function hideVendorRowsOverlay() {
         if (!vendorRowsOverlay) return;
         vendorRowsOverlay.classList.add('hidden');
@@ -417,19 +402,15 @@ document.addEventListener('DOMContentLoaded', function() {
             vendorName,
             vendorId,
             rows,
-            selectedDates,
-            hasSelectedDateFilter,
         } = currentVendorBookingsView;
 
         vendorRowsOverlayTitle.textContent = `${vendorName || '-'} (${vendorId || '-'})`;
-        vendorRowsOverlaySubtitle.textContent = hasSelectedDateFilter
-            ? `${rows.length} matching row(s) for ${selectedDates.join(', ')}`
-            : `${rows.length} row(s)`;
+        vendorRowsOverlaySubtitle.textContent = `${rows.length} row(s)`;
 
         if (!rows || rows.length === 0) {
             vendorRowsOverlayContent.innerHTML = `
                 <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-                    No vendor booking rows match the current selection.
+                    No vendor booking rows available.
                 </div>
             `;
             return;
@@ -480,9 +461,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const vendorName = payload.vendor_name || payload.vendor_id || '-';
         const bookings = payload.bookings || [];
-        const selectedDates = getSelectedBookingDates();
-        const selectedDateSet = new Set(selectedDates);
-        const hasSelectedDateFilter = selectedDateSet.size > 0;
         const rows = [];
         const bookedDates = new Set();
 
@@ -490,9 +468,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const bookingStatus = booking.status || '-';
             (booking.items || []).forEach((item) => {
                 const dateStr = item.start_dt ? item.start_dt.split(' ')[0] : '-';
-                if (hasSelectedDateFilter && !selectedDateSet.has(dateStr)) {
-                    return;
-                }
                 rows.push({
                     booking_id: booking.booking_id || '-',
                     generator_id: item.generator_id || '-',
@@ -528,15 +503,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 vendorName,
                 vendorId: payload.vendor_id || '',
                 rows: [],
-                selectedDates,
-                hasSelectedDateFilter,
             };
             if (vendorRowsOverlay && !vendorRowsOverlay.classList.contains('hidden')) {
                 syncVendorRowsOverlay();
             }
-            const emptyMessage = hasSelectedDateFilter
-                ? `No existing bookings match the selected dates for <span class="font-semibold text-slate-900">${escapeHtml(vendorName)}</span>.`
-                : `No existing genset rows found for <span class="font-semibold text-slate-900">${escapeHtml(vendorName)}</span>.`;
+            const emptyMessage = `No existing genset rows found for <span class="font-semibold text-slate-900">${escapeHtml(vendorName)}</span>.`;
             vendorBookingsContent.innerHTML = emptyMessage;
             return;
         }
@@ -556,8 +527,6 @@ document.addEventListener('DOMContentLoaded', function() {
             vendorName,
             vendorId: payload.vendor_id || '',
             rows,
-            selectedDates,
-            hasSelectedDateFilter,
         };
         if (vendorRowsOverlay && !vendorRowsOverlay.classList.contains('hidden')) {
             syncVendorRowsOverlay();
@@ -587,7 +556,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const normalizedVendorId = (vendorId || '').trim();
         if (!normalizedVendorId) {
             lastResolvedVendorId = '';
-            lastVendorBookingsPayload = null;
             currentVendorBookingsView = null;
             hideVendorRowsOverlay();
             if (bookingsAbortController) {
@@ -602,7 +570,6 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         lastResolvedVendorId = normalizedVendorId;
-        lastVendorBookingsPayload = null;
         currentVendorBookingsView = null;
         hideVendorRowsOverlay();
 
@@ -640,7 +607,6 @@ document.addEventListener('DOMContentLoaded', function() {
             if (currentSignal.aborted) {
                 return;
             }
-            lastVendorBookingsPayload = payload;
             renderVendorBookings(payload);
         } catch (error) {
             if (error.name === 'AbortError') {
@@ -793,7 +759,6 @@ document.addEventListener('DOMContentLoaded', function() {
             inline: true,
             onChange: function(selectedDates) {
                 updateSelectedDates(selectedDates);
-                rerenderVendorBookingsFromCache();
             }
         });
         updateSelectedDates(picker.selectedDates);
