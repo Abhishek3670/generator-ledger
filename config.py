@@ -7,6 +7,15 @@ from logging.handlers import RotatingFileHandler
 import logging
 import sys
 
+
+def _normalize_toggle_setting(value: str, default: str = "auto") -> str:
+    normalized = (value or default).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return "true"
+    if normalized in {"0", "false", "no", "off"}:
+        return "false"
+    return "auto"
+
 # Load environment variables from .env file if it exists
 try:
     from dotenv import load_dotenv
@@ -25,10 +34,18 @@ OWNER_USERNAME = os.getenv("OWNER_USERNAME", "").strip()
 OWNER_PASSWORD = os.getenv("OWNER_PASSWORD", "").strip()
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "gbl_session").strip()
 SESSION_TTL_MINUTES = int(os.getenv("SESSION_TTL_MINUTES", "480"))
+SESSION_COOKIE_SECURE = _normalize_toggle_setting(
+    os.getenv("SESSION_COOKIE_SECURE", "auto"),
+    default="auto",
+)
 JWT_SECRET = (os.getenv("JWT_SECRET", "").strip() or SESSION_SECRET)
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256").strip()
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "15"))
 CSRF_HEADER_NAME = os.getenv("CSRF_HEADER_NAME", "X-CSRF-Token").strip()
+ENABLE_HSTS = _normalize_toggle_setting(
+    os.getenv("ENABLE_HSTS", "auto"),
+    default="auto",
+)
 
 # Role Configuration
 ROLE_ADMIN = "admin"

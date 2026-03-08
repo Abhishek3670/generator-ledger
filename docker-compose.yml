@@ -5,7 +5,7 @@ services:
     build: .
     container_name: generator-ledger-web
     ports:
-      - "8000:8000"
+      - "${DOCKER_HOST_PORT:-8001}:8000"
     volumes:
       - ./Data:/app/Data
       - ./exported_data:/app/exported_data
@@ -14,7 +14,7 @@ services:
     environment:
       - DB_PATH=/app/ledger.db
       - HOST=${HOST:-0.0.0.0}
-      - PORT=${PORT:-8000}
+      - PORT=8000
       - DEBUG=${DEBUG:-false}
       - SESSION_SECRET=${SESSION_SECRET:?SESSION_SECRET not set}
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET not set}

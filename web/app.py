@@ -88,11 +88,13 @@ from config import (
     LOAD_SEED_DATA,
     SESSION_SECRET,
     SESSION_COOKIE_NAME,
+    SESSION_COOKIE_SECURE,
     SESSION_TTL_MINUTES,
     JWT_SECRET,
     JWT_ALGORITHM,
     JWT_EXPIRE_MINUTES,
     CSRF_HEADER_NAME,
+    ENABLE_HSTS,
     OWNER_USERNAME,
     OWNER_PASSWORD,
     ROLE_ADMIN,
@@ -675,25 +677,55 @@ def create_session(
     return session_id, csrf_token, expires_at
 
 
-def set_session_cookie(response: RedirectResponse, session_id: str, expires_at: int) -> None:
+def _request_uses_https(request: Optional[Request]) -> bool:
+    if request is None:
+        return False
+
+    scheme = str(request.scope.get("scheme", "")).lower()
+    if scheme == "https":
+        return True
+
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    if forwarded_proto:
+        return forwarded_proto.split(",")[0].strip().lower() == "https"
+    return False
+
+
+def _resolve_transport_security(setting: str, request: Optional[Request]) -> bool:
+    if setting == "true":
+        return True
+    if setting == "false":
+        return False
+    return _request_uses_https(request)
+
+
+def set_session_cookie(
+    response: RedirectResponse,
+    session_id: str,
+    expires_at: int,
+    request: Optional[Request] = None,
+) -> None:
     max_age = max(0, expires_at - now_ts())
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=session_id,
         max_age=max_age,
         httponly=True,
-        secure=True,
+        secure=_resolve_transport_security(SESSION_COOKIE_SECURE, request),
         samesite="strict",
         path="/",
     )
 
 
-def clear_session_cookie(response: RedirectResponse | JSONResponse | HTMLResponse) -> None:
+def clear_session_cookie(
+    response: RedirectResponse | JSONResponse | HTMLResponse,
+    request: Optional[Request] = None,
+) -> None:
     response.delete_cookie(
         key=SESSION_COOKIE_NAME,
         path="/",
         httponly=True,
-        secure=True,
+        secure=_resolve_transport_security(SESSION_COOKIE_SECURE, request),
         samesite="strict",
     )
 
@@ -788,8 +820,9 @@ def _apply_auth_state(request: Request, state: Dict[str, Any]) -> None:
     request.state.token_jti = state.get("token_jti")
 
 
-def _delete_session_cookie(response: Any) -> None:
+def _delete_session_cookie(response: Any, request: Optional[Request] = None) -> None:
     """Delete session cookie from response, with safe handling for streaming responses."""
+    secure = _resolve_transport_security(SESSION_COOKIE_SECURE, request)
     try:
         # Try to delete using the standard method for regular responses
         if hasattr(response, "delete_cookie"):
@@ -797,14 +830,15 @@ def _delete_session_cookie(response: Any) -> None:
                 SESSION_COOKIE_NAME,
                 path="/",
                 samesite="strict",
-                secure=True,
+                secure=secure,
                 httponly=True,
             )
         # Fallback for streaming/special responses: manipulate headers directly
         elif hasattr(response, "headers"):
+            secure_attr = "; Secure" if secure else ""
             response.headers.append(
                 "Set-Cookie",
-                f"{SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=strict; Secure; HttpOnly"
+                f"{SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=strict{secure_attr}; HttpOnly"
             )
     except Exception as e:
         logger.warning(f"Failed to delete session cookie: {e}", exc_info=False)
@@ -899,8 +933,8 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     # Enable XSS protection
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    # Enforce HTTPS (max-age: 1 year)
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if _resolve_transport_security(ENABLE_HSTS, request):
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     # Content Security Policy - allow Tailwind CDN, Google Fonts, FullCalendar, and inline styles/scripts
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
@@ -952,12 +986,12 @@ async def db_auth_middleware(request: Request, call_next):
         if not request.state.user and not is_public:
             response = unauthorized_response(request)
             if clear_cookie:
-                _delete_session_cookie(response)
+                _delete_session_cookie(response, request)
             return response
 
         response = await call_next(request)
         if clear_cookie:
-            _delete_session_cookie(response)
+            _delete_session_cookie(response, request)
         return response
     finally:
         duration_ms = (time.perf_counter() - request_started) * 1000.0
@@ -1243,7 +1277,7 @@ async def login(
 
     session_id, _csrf_token, expires_at = create_session(conn, user.id, request)
     response = RedirectResponse("/", status_code=303)
-    set_session_cookie(response, session_id, expires_at)
+    set_session_cookie(response, session_id, expires_at, request)
     return response
 
 
@@ -1287,7 +1321,7 @@ async def logout(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     if request.state.auth_type == "session" and request.state.session_id:
         SessionRepository(conn).delete(request.state.session_id)
     response = RedirectResponse("/login", status_code=303)
-    clear_session_cookie(response)
+    clear_session_cookie(response, request)
     return response
 
 
@@ -1316,7 +1350,7 @@ async def api_logout(request: Request, conn: sqlite3.Connection = Depends(get_db
 
     response = JSONResponse(status_code=200, content={"detail": "Logged out"})
     if request.state.auth_type == "session":
-        clear_session_cookie(response)
+        clear_session_cookie(response, request)
     return response
 
 
