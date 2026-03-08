@@ -71,12 +71,6 @@
                     </p>
                 </div>
 
-                <div id="vendorBookingsPanel" class="mt-5 hidden rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Existing Bookings for Selected Vendor</div>
-                    <div id="vendorBookingsContent" class="mt-3 text-sm text-slate-600">
-                        Select a valid vendor to view existing bookings.
-                    </div>
-                </div>
             </section>
 
             <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -125,13 +119,19 @@
 
             <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Booking Dates</div>
-                <div class="mt-4 grid gap-4 lg:grid-cols-[320px_1fr]">
-                    <div class="rounded-xl border border-slate-200 p-3 shadow-sm">
+                <div class="mt-4 grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)_minmax(0,1fr)]">
+                    <div class="booking-dates-calendar-card rounded-xl border border-slate-200 bg-slate-50 p-3 shadow-sm lg:h-full">
                         <input id="bookingDates" type="text" class="sr-only" aria-label="Booking dates">
                     </div>
-                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div class="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm lg:h-full">
                         <div class="text-sm font-semibold text-slate-700">Selected dates</div>
-                        <div id="selectedDates" class="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">No dates selected.</div>
+                        <div id="selectedDates" class="mt-3 flex flex-wrap content-start gap-2 text-xs text-slate-500 lg:flex-1 lg:min-h-0 lg:overflow-y-auto">No dates selected.</div>
+                    </div>
+                    <div id="vendorBookingsPanel" class="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm lg:h-full">
+                        <div id="vendorBookingsHeading" class="text-sm font-semibold text-slate-700">Existing bookings</div>
+                        <div id="vendorBookingsContent" class="mt-3 flex flex-col gap-3 text-xs text-slate-500 lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
+                            No vendor selected.
+                        </div>
                     </div>
                 </div>
 
@@ -178,6 +178,24 @@
     </div>
 </div>
 
+<div id="vendorRowsOverlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
+    <div class="w-full max-w-4xl rounded-2xl bg-white shadow-xl">
+        <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Vendor Booking Rows</div>
+                <div id="vendorRowsOverlayTitle" class="mt-1 text-lg font-semibold text-slate-900">-</div>
+                <div id="vendorRowsOverlaySubtitle" class="mt-1 text-xs text-slate-500">-</div>
+            </div>
+            <button id="closeVendorRowsOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                Close
+            </button>
+        </div>
+        <div id="vendorRowsOverlayContent" class="max-h-[70vh] overflow-y-auto px-6 py-4 text-sm text-slate-700">
+            <div class="text-sm text-slate-500">Select a vendor to view booking rows.</div>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -203,10 +221,18 @@ document.addEventListener('DOMContentLoaded', function() {
     const closeBookingOverlay = document.getElementById('closeBookingOverlay');
     const overlayDone = document.getElementById('overlayDone');
     const vendorBookingsPanel = document.getElementById('vendorBookingsPanel');
+    const vendorBookingsHeading = document.getElementById('vendorBookingsHeading');
     const vendorBookingsContent = document.getElementById('vendorBookingsContent');
+    const vendorRowsOverlay = document.getElementById('vendorRowsOverlay');
+    const vendorRowsOverlayTitle = document.getElementById('vendorRowsOverlayTitle');
+    const vendorRowsOverlaySubtitle = document.getElementById('vendorRowsOverlaySubtitle');
+    const vendorRowsOverlayContent = document.getElementById('vendorRowsOverlayContent');
+    const closeVendorRowsOverlay = document.getElementById('closeVendorRowsOverlay');
 
     let bookingsAbortController = null;
     let lastResolvedVendorId = '';
+    let lastVendorBookingsPayload = null;
+    let currentVendorBookingsView = null;
 
     function escapeHtml(value) {
         return String(value ?? '')
@@ -303,38 +329,143 @@ document.addEventListener('DOMContentLoaded', function() {
         vendorDropdown.classList.add('hidden');
     }
 
-    function hideVendorBookingsPanel() {
-        if (!vendorBookingsPanel) return;
-        vendorBookingsPanel.classList.add('hidden');
-    }
-
     function showVendorBookingsPanel() {
         if (!vendorBookingsPanel) return;
         vendorBookingsPanel.classList.remove('hidden');
+        vendorBookingsPanel.classList.add('flex');
+    }
+
+    function setVendorBookingsHeading(hasVendor) {
+        if (!vendorBookingsHeading) return;
+        vendorBookingsHeading.textContent = hasVendor
+            ? 'Existing bookings for selected vendor'
+            : 'Existing bookings';
+    }
+
+    function getSelectedBookingDates() {
+        if (!picker || !Array.isArray(picker.selectedDates) || picker.selectedDates.length === 0) {
+            return [];
+        }
+        return picker.selectedDates
+            .map(date => picker.formatDate(date, 'Y-m-d'))
+            .sort();
+    }
+
+    function rerenderVendorBookingsFromCache() {
+        if (!lastResolvedVendorId || !lastVendorBookingsPayload) return;
+        renderVendorBookings(lastVendorBookingsPayload);
+    }
+
+    function hideVendorRowsOverlay() {
+        if (!vendorRowsOverlay) return;
+        vendorRowsOverlay.classList.add('hidden');
+        vendorRowsOverlay.classList.remove('flex');
+    }
+
+    function showVendorRowsOverlay() {
+        if (!vendorRowsOverlay) return;
+        vendorRowsOverlay.classList.remove('hidden');
+        vendorRowsOverlay.classList.add('flex');
+    }
+
+    function renderVendorRowsTable(rows) {
+        const tableRows = rows.map((row) => `
+            <tr class="border-b border-slate-100 last:border-b-0">
+                <td class="px-3 py-2 font-semibold text-slate-900">${escapeHtml(row.booking_id)}</td>
+                <td class="px-3 py-2">${escapeHtml(row.generator_id)}</td>
+                <td class="px-3 py-2">${escapeHtml(row.capacity)}</td>
+                <td class="px-3 py-2">${escapeHtml(row.booking_date)}</td>
+                <td class="px-3 py-2">
+                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${getStatusBadgeClass(row.status)}">
+                        ${escapeHtml(row.status)}
+                    </span>
+                </td>
+            </tr>
+        `).join('');
+
+        return `
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-xs text-slate-700">
+                    <thead class="sticky top-0 bg-slate-50 text-slate-500">
+                        <tr>
+                            <th class="px-3 py-2 text-left font-semibold">Booking ID</th>
+                            <th class="px-3 py-2 text-left font-semibold">Generator ID</th>
+                            <th class="px-3 py-2 text-left font-semibold">Capacity</th>
+                            <th class="px-3 py-2 text-left font-semibold">Date of Booking</th>
+                            <th class="px-3 py-2 text-left font-semibold">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tableRows}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    function syncVendorRowsOverlay() {
+        if (!vendorRowsOverlayContent || !vendorRowsOverlayTitle || !vendorRowsOverlaySubtitle) return;
+
+        if (!currentVendorBookingsView) {
+            vendorRowsOverlayTitle.textContent = '-';
+            vendorRowsOverlaySubtitle.textContent = '-';
+            vendorRowsOverlayContent.innerHTML = '<div class="text-sm text-slate-500">No vendor booking rows available.</div>';
+            return;
+        }
+
+        const {
+            vendorName,
+            vendorId,
+            rows,
+            selectedDates,
+            hasSelectedDateFilter,
+        } = currentVendorBookingsView;
+
+        vendorRowsOverlayTitle.textContent = `${vendorName || '-'} (${vendorId || '-'})`;
+        vendorRowsOverlaySubtitle.textContent = hasSelectedDateFilter
+            ? `${rows.length} matching row(s) for ${selectedDates.join(', ')}`
+            : `${rows.length} row(s)`;
+
+        if (!rows || rows.length === 0) {
+            vendorRowsOverlayContent.innerHTML = `
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+                    No vendor booking rows match the current selection.
+                </div>
+            `;
+            return;
+        }
+
+        vendorRowsOverlayContent.innerHTML = renderVendorRowsTable(rows);
+    }
+
+    function openVendorRowsOverlay() {
+        if (!currentVendorBookingsView || !currentVendorBookingsView.rows || currentVendorBookingsView.rows.length === 0) {
+            return;
+        }
+        syncVendorRowsOverlay();
+        showVendorRowsOverlay();
     }
 
     function renderVendorBookingsPrompt() {
         if (!vendorBookingsContent) return;
-        vendorBookingsContent.innerHTML = `
-            <div class="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-500">
-                Select a valid vendor to view existing bookings.
-            </div>
-        `;
+        currentVendorBookingsView = null;
+        setVendorBookingsHeading(false);
+        vendorBookingsContent.innerHTML = 'No vendor selected. Select a vendor to view existing bookings.';
     }
 
     function renderVendorBookingsLoading() {
         if (!vendorBookingsContent) return;
         showVendorBookingsPanel();
-        vendorBookingsContent.innerHTML = `
-            <div class="rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
-                Loading existing bookings...
-            </div>
-        `;
+        currentVendorBookingsView = null;
+        setVendorBookingsHeading(true);
+        vendorBookingsContent.innerHTML = 'Loading existing bookings...';
     }
 
     function renderVendorBookingsError(message) {
         if (!vendorBookingsContent) return;
         showVendorBookingsPanel();
+        currentVendorBookingsView = null;
+        setVendorBookingsHeading(Boolean(lastResolvedVendorId));
         vendorBookingsContent.innerHTML = `
             <div class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700">
                 ${escapeHtml(message)}
@@ -345,9 +476,13 @@ document.addEventListener('DOMContentLoaded', function() {
     function renderVendorBookings(payload) {
         if (!vendorBookingsContent) return;
         showVendorBookingsPanel();
+        setVendorBookingsHeading(true);
 
         const vendorName = payload.vendor_name || payload.vendor_id || '-';
         const bookings = payload.bookings || [];
+        const selectedDates = getSelectedBookingDates();
+        const selectedDateSet = new Set(selectedDates);
+        const hasSelectedDateFilter = selectedDateSet.size > 0;
         const rows = [];
         const bookedDates = new Set();
 
@@ -355,6 +490,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const bookingStatus = booking.status || '-';
             (booking.items || []).forEach((item) => {
                 const dateStr = item.start_dt ? item.start_dt.split(' ')[0] : '-';
+                if (hasSelectedDateFilter && !selectedDateSet.has(dateStr)) {
+                    return;
+                }
                 rows.push({
                     booking_id: booking.booking_id || '-',
                     generator_id: item.generator_id || '-',
@@ -386,11 +524,20 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         if (rows.length === 0) {
-            vendorBookingsContent.innerHTML = `
-                <div class="rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-600">
-                    No existing genset rows found for <span class="font-semibold text-slate-900">${escapeHtml(vendorName)}</span>.
-                </div>
-            `;
+            currentVendorBookingsView = {
+                vendorName,
+                vendorId: payload.vendor_id || '',
+                rows: [],
+                selectedDates,
+                hasSelectedDateFilter,
+            };
+            if (vendorRowsOverlay && !vendorRowsOverlay.classList.contains('hidden')) {
+                syncVendorRowsOverlay();
+            }
+            const emptyMessage = hasSelectedDateFilter
+                ? `No existing bookings match the selected dates for <span class="font-semibold text-slate-900">${escapeHtml(vendorName)}</span>.`
+                : `No existing genset rows found for <span class="font-semibold text-slate-900">${escapeHtml(vendorName)}</span>.`;
+            vendorBookingsContent.innerHTML = emptyMessage;
             return;
         }
 
@@ -405,45 +552,33 @@ document.addEventListener('DOMContentLoaded', function() {
                </div>`
             : '';
 
-        const tableRows = rows.map((row) => `
-            <tr class="border-b border-slate-100 last:border-b-0">
-                <td class="px-3 py-2 font-semibold text-slate-900">${escapeHtml(row.booking_id)}</td>
-                <td class="px-3 py-2">${escapeHtml(row.generator_id)}</td>
-                <td class="px-3 py-2">${escapeHtml(row.capacity)}</td>
-                <td class="px-3 py-2">${escapeHtml(row.booking_date)}</td>
-                <td class="px-3 py-2">
-                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${getStatusBadgeClass(row.status)}">
-                        ${escapeHtml(row.status)}
-                    </span>
-                </td>
-            </tr>
-        `).join('');
+        currentVendorBookingsView = {
+            vendorName,
+            vendorId: payload.vendor_id || '',
+            rows,
+            selectedDates,
+            hasSelectedDateFilter,
+        };
+        if (vendorRowsOverlay && !vendorRowsOverlay.classList.contains('hidden')) {
+            syncVendorRowsOverlay();
+        }
 
         vendorBookingsContent.innerHTML = `
-            <div class="rounded-lg border border-slate-200 bg-white">
-                <div class="border-b border-slate-200 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-                    ${escapeHtml(vendorName)} (${escapeHtml(payload.vendor_id || '-')})
-                </div>
-                <div class="px-3 py-3">
-                    ${dateRangeSummary}
-                    <div class="text-xs text-slate-500">💡 Tip: Avoid selecting dates shown above to prevent overbooking</div>
-                </div>
-                <div class="max-h-[34vh] overflow-auto sm:max-h-[42vh] lg:max-h-[50vh]">
-                    <table class="min-w-full text-xs text-slate-700">
-                        <thead class="sticky top-0 bg-slate-50 text-slate-500">
-                            <tr>
-                                <th class="px-3 py-2 text-left font-semibold">Booking ID</th>
-                                <th class="px-3 py-2 text-left font-semibold">Generator ID</th>
-                                <th class="px-3 py-2 text-left font-semibold">Capacity</th>
-                                <th class="px-3 py-2 text-left font-semibold">Date of Booking</th>
-                                <th class="px-3 py-2 text-left font-semibold">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${tableRows}
-                        </tbody>
-                    </table>
-                </div>
+            <div class="text-xs font-semibold text-slate-700">
+                ${escapeHtml(vendorName)} <span class="font-normal text-slate-500">(${escapeHtml(payload.vendor_id || '-')})</span>
+            </div>
+            ${dateRangeSummary}
+            <div class="text-xs text-slate-500">Tip: Avoid selecting dates shown above to prevent overbooking.</div>
+            <div class="flex justify-end">
+                <button
+                    type="button"
+                    data-vendor-bookings-open-overlay
+                    class="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                    aria-haspopup="dialog"
+                    aria-controls="vendorRowsOverlay"
+                >
+                    Show detail
+                </button>
             </div>
         `;
     }
@@ -452,12 +587,14 @@ document.addEventListener('DOMContentLoaded', function() {
         const normalizedVendorId = (vendorId || '').trim();
         if (!normalizedVendorId) {
             lastResolvedVendorId = '';
+            lastVendorBookingsPayload = null;
+            currentVendorBookingsView = null;
+            hideVendorRowsOverlay();
             if (bookingsAbortController) {
                 bookingsAbortController.abort();
                 bookingsAbortController = null;
             }
             renderVendorBookingsPrompt();
-            hideVendorBookingsPanel();
             return;
         }
 
@@ -465,6 +602,9 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         lastResolvedVendorId = normalizedVendorId;
+        lastVendorBookingsPayload = null;
+        currentVendorBookingsView = null;
+        hideVendorRowsOverlay();
 
         if (bookingsAbortController) {
             bookingsAbortController.abort();
@@ -500,6 +640,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (currentSignal.aborted) {
                 return;
             }
+            lastVendorBookingsPayload = payload;
             renderVendorBookings(payload);
         } catch (error) {
             if (error.name === 'AbortError') {
@@ -582,6 +723,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    vendorBookingsContent?.addEventListener('click', function(event) {
+        const openButton = event.target.closest('[data-vendor-bookings-open-overlay]');
+        if (!openButton) return;
+        openVendorRowsOverlay();
+    });
+
     function updateAssignStyles() {
         document.querySelectorAll('[data-assign-option]').forEach(option => {
             const input = option.querySelector('input[type="radio"]');
@@ -646,6 +793,7 @@ document.addEventListener('DOMContentLoaded', function() {
             inline: true,
             onChange: function(selectedDates) {
                 updateSelectedDates(selectedDates);
+                rerenderVendorBookingsFromCache();
             }
         });
         updateSelectedDates(picker.selectedDates);
@@ -798,8 +946,21 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    closeVendorRowsOverlay?.addEventListener('click', hideVendorRowsOverlay);
+
+    vendorRowsOverlay?.addEventListener('click', function(event) {
+        if (event.target === vendorRowsOverlay) {
+            hideVendorRowsOverlay();
+        }
+    });
+
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape' && vendorRowsOverlay && !vendorRowsOverlay.classList.contains('hidden')) {
+            hideVendorRowsOverlay();
+        }
+    });
+
     renderVendorBookingsPrompt();
-    hideVendorBookingsPanel();
     updateAssignStyles();
 });
 </script>
