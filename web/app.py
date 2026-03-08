@@ -29,6 +29,7 @@ except ImportError:  # pragma: no cover - handled at runtime
 from core import (
     Generator,
     Vendor,
+    RentalVendor,
     DatabaseManager,
     BookingService,
     DataLoader,
@@ -36,6 +37,7 @@ from core import (
     AvailabilityChecker,
     GeneratorRepository,
     VendorRepository,
+    RentalVendorRepository,
     BookingRepository,
     BookingHistoryRepository,
     UserRepository,
@@ -49,7 +51,13 @@ from core.observability import (
 )
 from core.utils import transaction, now_ts
 from core.validation import ensure_booking
-from core.services import create_vendor, archive_all_bookings, log_booking_history, encode_history_items
+from core.services import (
+    create_vendor,
+    create_rental_vendor,
+    archive_all_bookings,
+    log_booking_history,
+    encode_history_items,
+)
 from core.auth import (
     hash_password,
     verify_password,
@@ -1453,10 +1461,13 @@ async def vendors_page(
     """Vendors list page."""
     try:
         vendor_repo = VendorRepository(conn)
+        rental_vendor_repo = RentalVendorRepository(conn)
         vendors = vendor_repo.get_all()
+        rental_vendors = rental_vendor_repo.get_all()
         return templates.TemplateResponse("vendors.html", template_context(
             request,
-            vendors=vendors
+            vendors=vendors,
+            rental_vendors=rental_vendors,
         ))
     except Exception as e:
         logger.error(f"Error loading vendors page: {e}", exc_info=True)
@@ -2447,27 +2458,58 @@ async def api_create_generator(
         raise HTTPException(status_code=500, detail="An error occurred while creating the generator")
 
 
+def _serialize_vendor_directory_entry(vendor: Vendor | RentalVendor) -> Dict[str, str]:
+    return {
+        "id": vendor.vendor_id,
+        "name": vendor.vendor_name,
+        "place": vendor.vendor_place,
+        "phone": vendor.phone,
+    }
+
+
+def _normalize_vendor_directory_fields(
+    request_data: CreateVendorRequest | UpdateVendorRequest,
+) -> Tuple[str, str, str]:
+    vendor_name = request_data.vendor_name.strip() if request_data.vendor_name else ""
+    vendor_place = (
+        request_data.vendor_place.strip() if request_data.vendor_place else ""
+    ).strip() or "Civil Line"
+    phone = request_data.phone.strip() if request_data.phone else ""
+
+    if not vendor_name:
+        raise HTTPException(status_code=400, detail="Vendor Name is required")
+
+    return vendor_name, vendor_place, phone
+
+
 @app.get("/api/vendors")
 async def api_vendors(
     _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
-    """Get all vendors."""
+    """Get all retailer vendors."""
     try:
         vendor_repo = VendorRepository(conn)
         vendors = vendor_repo.get_all()
-        return [
-            {
-                "id": v.vendor_id,
-                "name": v.vendor_name,
-                "place": v.vendor_place,
-                "phone": v.phone
-            }
-            for v in vendors
-        ]
+        return [_serialize_vendor_directory_entry(v) for v in vendors]
     except Exception as e:
         logger.error(f"Error fetching vendors: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while fetching vendors")
+
+
+@app.get("/api/rental-vendors")
+async def api_rental_vendors(
+    _: Any = Depends(require_capability(CAPABILITY_READ_ONLY_OPERATIONAL_VIEWS)),
+    conn: sqlite3.Connection = Depends(get_db)
+):
+    """Get all rental vendors."""
+    try:
+        rental_vendor_repo = RentalVendorRepository(conn)
+        rental_vendors = rental_vendor_repo.get_all()
+        return [_serialize_vendor_directory_entry(v) for v in rental_vendors]
+    except Exception as e:
+        logger.error(f"Error fetching rental vendors: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An error occurred while fetching rental vendors")
 
 
 @app.get("/api/vendors/{vendor_id}/bookings")
@@ -2727,15 +2769,10 @@ async def api_create_vendor(
     _: Any = Depends(require_capability(CAPABILITY_VENDOR_MANAGEMENT)),
     conn: sqlite3.Connection = Depends(get_db)
 ):
-    """Create a new vendor with auto-generated ID."""
+    """Create a new retailer vendor with auto-generated ID."""
     try:
-        vendor_name = request_data.vendor_name.strip() if request_data.vendor_name else ""
-        vendor_place = (request_data.vendor_place.strip() if request_data.vendor_place else "").strip() or "Civil Line"
-        phone = request_data.phone.strip() if request_data.phone else ""
-        
-        if not vendor_name:
-            raise HTTPException(status_code=400, detail="Vendor Name is required")
-        
+        vendor_name, vendor_place, phone = _normalize_vendor_directory_fields(request_data)
+
         # Auto-generate vendor ID if not provided
         vendor_id = request_data.vendor_id
         if not vendor_id or not vendor_id.strip():
@@ -2769,7 +2806,7 @@ async def api_update_vendor(
     _: Any = Depends(require_capability(CAPABILITY_VENDOR_MANAGEMENT)),
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    """Update vendor profile details."""
+    """Update retailer vendor profile details."""
     try:
         vendor_repo = VendorRepository(conn)
         existing_vendor = vendor_repo.get_by_id(vendor_id)
@@ -2779,14 +2816,7 @@ async def api_update_vendor(
             )
             raise HTTPException(status_code=404, detail="Vendor not found")
 
-        vendor_name = request_data.vendor_name.strip() if request_data.vendor_name else ""
-        vendor_place = (
-            request_data.vendor_place.strip() if request_data.vendor_place else ""
-        ).strip() or "Civil Line"
-        phone = request_data.phone.strip() if request_data.phone else ""
-
-        if not vendor_name:
-            raise HTTPException(status_code=400, detail="Vendor Name is required")
+        vendor_name, vendor_place, phone = _normalize_vendor_directory_fields(request_data)
 
         duplicate_vendor_id = vendor_repo.find_duplicate_name(vendor_name, exclude_vendor_id=vendor_id)
         if duplicate_vendor_id:
@@ -2823,6 +2853,105 @@ async def api_update_vendor(
     except Exception as e:
         logger.error(f"Error updating vendor: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while updating the vendor")
+
+
+@app.post("/api/rental-vendors")
+async def api_create_rental_vendor(
+    request_data: CreateVendorRequest,
+    _: Any = Depends(require_capability(CAPABILITY_VENDOR_MANAGEMENT)),
+    conn: sqlite3.Connection = Depends(get_db)
+):
+    """Create a new rental vendor with auto-generated ID."""
+    try:
+        vendor_name, vendor_place, phone = _normalize_vendor_directory_fields(request_data)
+
+        vendor_id = request_data.vendor_id
+        if not vendor_id or not vendor_id.strip():
+            rental_vendor_repo = RentalVendorRepository(conn)
+            vendor_id = rental_vendor_repo.generate_vendor_id()
+        else:
+            vendor_id = vendor_id.strip()
+
+        logger.info(
+            "API rental vendor creation request | context=%s",
+            {"vendor_id": vendor_id, "vendor_name": vendor_name},
+        )
+
+        success, message = create_rental_vendor(conn, vendor_id, vendor_name, vendor_place, phone)
+
+        if success:
+            logger.info(f"Rental vendor created successfully | context={{'vendor_id': '{vendor_id}'}}")
+            return {"success": True, "message": message, "vendor_id": vendor_id}
+
+        logger.warning(
+            f"Rental vendor creation failed | context={{'vendor_id': '{vendor_id}', 'reason': '{message}'}}"
+        )
+        raise HTTPException(status_code=400, detail=message)
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Error creating rental vendor: {error_msg}", exc_info=True)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+
+@app.patch("/api/rental-vendors/{vendor_id}")
+async def api_update_rental_vendor(
+    vendor_id: str,
+    request_data: UpdateVendorRequest,
+    _: Any = Depends(require_capability(CAPABILITY_VENDOR_MANAGEMENT)),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Update rental vendor profile details."""
+    try:
+        rental_vendor_repo = RentalVendorRepository(conn)
+        existing_vendor = rental_vendor_repo.get_by_id(vendor_id)
+        if not existing_vendor:
+            logger.warning(
+                f"Rental vendor update failed | context={{'vendor_id': '{vendor_id}', 'reason': 'not found'}}"
+            )
+            raise HTTPException(status_code=404, detail="Rental vendor not found")
+
+        vendor_name, vendor_place, phone = _normalize_vendor_directory_fields(request_data)
+
+        duplicate_vendor_id = rental_vendor_repo.find_duplicate_name(
+            vendor_name,
+            exclude_vendor_id=vendor_id,
+        )
+        if duplicate_vendor_id:
+            logger.warning(
+                "Rental vendor update failed | context="
+                f"{{'vendor_id': '{vendor_id}', 'reason': 'duplicate name', 'duplicate_vendor_id': '{duplicate_vendor_id}'}}"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rental vendor name '{vendor_name}' already exists with ID '{duplicate_vendor_id}'",
+            )
+
+        rental_vendor_repo.save(
+            RentalVendor(
+                vendor_id=vendor_id,
+                vendor_name=vendor_name,
+                vendor_place=vendor_place,
+                phone=phone,
+            )
+        )
+        logger.info(f"Rental vendor updated successfully | context={{'vendor_id': '{vendor_id}'}}")
+        return {
+            "success": True,
+            "message": f"Rental vendor {vendor_id} updated successfully",
+            "vendor": {
+                "id": vendor_id,
+                "name": vendor_name,
+                "place": vendor_place,
+                "phone": phone,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating rental vendor: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An error occurred while updating the rental vendor")
 
 
 @app.delete("/api/vendors/{vendor_id}")
@@ -2864,6 +2993,32 @@ async def api_delete_vendor(
     except Exception as e:
         logger.error(f"Error deleting vendor: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while deleting the vendor")
+
+
+@app.delete("/api/rental-vendors/{vendor_id}")
+async def api_delete_rental_vendor(
+    vendor_id: str,
+    _: Any = Depends(require_capability(CAPABILITY_VENDOR_MANAGEMENT)),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Delete a rental vendor."""
+    try:
+        rental_vendor_repo = RentalVendorRepository(conn)
+        vendor = rental_vendor_repo.get_by_id(vendor_id)
+        if not vendor:
+            logger.warning(
+                f"Rental vendor delete failed | context={{'vendor_id': '{vendor_id}', 'reason': 'not found'}}"
+            )
+            raise HTTPException(status_code=404, detail="Rental vendor not found")
+
+        rental_vendor_repo.delete(vendor_id)
+        logger.info(f"Rental vendor deleted successfully | context={{'vendor_id': '{vendor_id}'}}")
+        return {"success": True, "message": f"Rental vendor {vendor_id} deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting rental vendor: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An error occurred while deleting the rental vendor")
 
 
 @app.post("/api/bookings")

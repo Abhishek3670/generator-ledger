@@ -51,6 +51,15 @@ class Vendor:
 
 
 @dataclass
+class RentalVendor:
+    """Rental vendor data model."""
+    vendor_id: str
+    vendor_name: str
+    vendor_place: str = ""
+    phone: str = ""
+
+
+@dataclass
 class BookingItem:
     """Booking item data model."""
     booking_id: str

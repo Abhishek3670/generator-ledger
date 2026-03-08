@@ -11,6 +11,7 @@ from config import STATUS_CONFIRMED
 from .models import (
     Generator,
     Vendor,
+    RentalVendor,
     Booking,
     BookingItem,
     BookingHistory,
@@ -102,58 +103,62 @@ class GeneratorRepository:
         return int(row[0]) if row and row[0] is not None else 0
 
 
-class VendorRepository:
-    """Repository for vendor data access."""
-    
+class _VendorDirectoryRepository:
+    """Shared repository logic for vendor-style directory tables."""
+
+    TABLE_NAME = ""
+    SEQ_TABLE_NAME = ""
+    ID_PREFIX = ""
+    MODEL_CLS = Vendor
+
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
         self.logger = logging.getLogger(self.__class__.__name__)
-    
-    def get_by_id(self, vendor_id: str) -> Optional[Vendor]:
-        cur = self.conn.cursor()
-        cur.execute("SELECT * FROM vendors WHERE vendor_id = ?", (vendor_id,))
-        row = cur.fetchone()
-        
-        if not row:
-            return None
-        
-        return Vendor(
+
+    def _row_to_model(self, row: Any) -> Vendor | RentalVendor:
+        return self.MODEL_CLS(
             vendor_id=row[0],
             vendor_name=row[1],
             vendor_place=row[2] or "",
-            phone=row[3] or ""
+            phone=row[3] or "",
         )
-    
-    def save(self, vendor: Vendor) -> None:
+
+    def get_by_id(self, vendor_id: str) -> Optional[Vendor | RentalVendor]:
+        cur = self.conn.cursor()
+        cur.execute(
+            f"SELECT vendor_id, vendor_name, vendor_place, phone FROM {self.TABLE_NAME} WHERE vendor_id = ?",
+            (vendor_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+
+        return self._row_to_model(row)
+
+    def save(self, vendor: Vendor | RentalVendor) -> None:
         try:
             cur = self.conn.cursor()
             cur.execute(
-                """INSERT OR REPLACE INTO vendors
+                f"""INSERT OR REPLACE INTO {self.TABLE_NAME}
                 (vendor_id, vendor_name, vendor_place, phone)
                 VALUES (?, ?, ?, ?)""",
-                (vendor.vendor_id, vendor.vendor_name, vendor.vendor_place, vendor.phone)
+                (vendor.vendor_id, vendor.vendor_name, vendor.vendor_place, vendor.phone),
             )
             self.conn.commit()
         except sqlite3.Error:
             self.logger.error(f"Failed to save vendor | context={{'id': '{vendor.vendor_id}'}}", exc_info=True)
             raise
-    
-    def get_all(self) -> List[Vendor]:
+
+    def get_all(self) -> List[Vendor | RentalVendor]:
         cur = self.conn.cursor()
-        cur.execute("SELECT * FROM vendors ORDER BY vendor_id")
-        vendors = []
-        for row in cur.fetchall():
-            vendors.append(Vendor(
-                vendor_id=row[0],
-                vendor_name=row[1],
-                vendor_place=row[2] or "",
-                phone=row[3] or ""
-            ))
-        return vendors
+        cur.execute(
+            f"SELECT vendor_id, vendor_name, vendor_place, phone FROM {self.TABLE_NAME} ORDER BY vendor_id"
+        )
+        return [self._row_to_model(row) for row in cur.fetchall()]
 
     def delete(self, vendor_id: str, commit: bool = True) -> None:
         cur = self.conn.cursor()
-        cur.execute("DELETE FROM vendors WHERE vendor_id = ?", (vendor_id,))
+        cur.execute(f"DELETE FROM {self.TABLE_NAME} WHERE vendor_id = ?", (vendor_id,))
         if commit:
             self.conn.commit()
 
@@ -165,9 +170,9 @@ class VendorRepository:
         cur = self.conn.cursor()
         if exclude_vendor_id:
             cur.execute(
-                """
+                f"""
                 SELECT vendor_id
-                FROM vendors
+                FROM {self.TABLE_NAME}
                 WHERE LOWER(vendor_name) = LOWER(?)
                   AND vendor_id <> ?
                 """,
@@ -175,18 +180,18 @@ class VendorRepository:
             )
         else:
             cur.execute(
-                """
+                f"""
                 SELECT vendor_id
-                FROM vendors
+                FROM {self.TABLE_NAME}
                 WHERE LOWER(vendor_name) = LOWER(?)
                 """,
                 (vendor_name,),
             )
         row = cur.fetchone()
         return row[0] if row else None
-    
+
     def generate_vendor_id(self) -> str:
-        """Generate the next vendor ID in sequence (VEN001, VEN002, etc.)."""
+        """Generate the next vendor ID in sequence."""
         cur = self.conn.cursor()
         started_tx = False
         if not self.conn.in_transaction:
@@ -195,33 +200,53 @@ class VendorRepository:
 
         try:
             cur.execute(
-                "INSERT OR IGNORE INTO vendor_id_seq (id, next_val) VALUES (1, 1)"
+                f"INSERT OR IGNORE INTO {self.SEQ_TABLE_NAME} (id, next_val) VALUES (1, 1)"
             )
-            cur.execute("SELECT next_val FROM vendor_id_seq WHERE id = 1")
+            cur.execute(f"SELECT next_val FROM {self.SEQ_TABLE_NAME} WHERE id = 1")
             row = cur.fetchone()
             seq_val = row[0] if row else 1
 
+            prefix_length = len(self.ID_PREFIX)
             cur.execute(
-                "SELECT MAX(CAST(SUBSTR(vendor_id, 4) AS INTEGER)) "
-                "FROM vendors WHERE vendor_id GLOB 'VEN[0-9]*'"
+                f"SELECT MAX(CAST(SUBSTR(vendor_id, {prefix_length + 1}) AS INTEGER)) "
+                f"FROM {self.TABLE_NAME} WHERE vendor_id GLOB ?",
+                (f"{self.ID_PREFIX}[0-9]*",),
             )
             max_row = cur.fetchone()
             max_existing = max_row[0] if max_row and max_row[0] else 0
 
             next_num = max(seq_val, max_existing + 1)
             cur.execute(
-                "UPDATE vendor_id_seq SET next_val = ? WHERE id = 1",
-                (next_num + 1,)
+                f"UPDATE {self.SEQ_TABLE_NAME} SET next_val = ? WHERE id = 1",
+                (next_num + 1,),
             )
 
             if started_tx:
                 self.conn.commit()
 
-            return f"VEN{next_num:03d}"
+            return f"{self.ID_PREFIX}{next_num:03d}"
         except Exception:
             if started_tx:
                 self.conn.rollback()
             raise
+
+
+class VendorRepository(_VendorDirectoryRepository):
+    """Repository for retailer vendor data access."""
+
+    TABLE_NAME = "vendors"
+    SEQ_TABLE_NAME = "vendor_id_seq"
+    ID_PREFIX = "VEN"
+    MODEL_CLS = Vendor
+
+
+class RentalVendorRepository(_VendorDirectoryRepository):
+    """Repository for rental vendor data access."""
+
+    TABLE_NAME = "rental_vendors"
+    SEQ_TABLE_NAME = "rental_vendor_id_seq"
+    ID_PREFIX = "RNV"
+    MODEL_CLS = RentalVendor
 
 
 class BookingRepository:

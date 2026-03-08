@@ -49,11 +49,14 @@ PERMISSION_MATRIX_CAPABILITIES = (
     {
         "key": CAPABILITY_VENDOR_MANAGEMENT,
         "label": "Vendor Management",
-        "description": "Create, update, and delete vendors.",
+        "description": "Create, update, and delete retailer and rental vendors.",
         "endpoint_refs": (
             "POST /api/vendors",
             "PATCH /api/vendors/{vendor_id}",
             "DELETE /api/vendors/{vendor_id}",
+            "POST /api/rental-vendors",
+            "PATCH /api/rental-vendors/{vendor_id}",
+            "DELETE /api/rental-vendors/{vendor_id}",
         ),
         "admin_allowed": True,
         "operator_allowed": False,
@@ -135,6 +138,7 @@ PERMISSION_MATRIX_CAPABILITIES = (
             "GET /api/bookings/{booking_id}",
             "GET /api/vendors",
             "GET /api/vendors/{vendor_id}/bookings",
+            "GET /api/rental-vendors",
             "GET /api/generators",
             "GET /api/generators/{generator_id}/bookings",
             "GET /api/calendar/events",

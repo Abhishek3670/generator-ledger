@@ -6,6 +6,7 @@ Contains all data models, repositories, and services.
 from .models import (
     Generator,
     Vendor,
+    RentalVendor,
     Booking,
     BookingItem,
     BookingHistory,
@@ -17,6 +18,7 @@ from .database import DatabaseManager
 from .repositories import (
     GeneratorRepository,
     VendorRepository,
+    RentalVendorRepository,
     BookingRepository,
     BookingHistoryRepository,
     UserRepository,
@@ -32,6 +34,7 @@ from .utils import DateTimeParser
 __all__ = [
     "Generator",
     "Vendor",
+    "RentalVendor",
     "Booking",
     "BookingItem",
     "BookingHistory",
@@ -41,6 +44,7 @@ __all__ = [
     "DatabaseManager",
     "GeneratorRepository",
     "VendorRepository",
+    "RentalVendorRepository",
     "BookingRepository",
     "BookingHistoryRepository",
     "UserRepository",

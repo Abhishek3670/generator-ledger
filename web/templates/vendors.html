@@ -1,5 +1,81 @@
 {% extends "base.html" %}
 
+{% macro vendor_section(section_id, title, description, vendors, vendor_kind, empty_message, permissions) %}
+<section class="mt-8 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:p-6">
+    <div class="flex flex-wrap items-center justify-between gap-4">
+        <div>
+            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Vendor Directory</div>
+            <h2 class="mt-2 text-xl font-semibold text-slate-900">{{ title }}</h2>
+            <p class="mt-1 text-sm text-slate-500">{{ description }}</p>
+        </div>
+        {% if permissions.get('vendor_management') %}
+            <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                onclick="openAddVendorModal('{{ vendor_kind }}')"
+            >
+                + Add {{ "Rental Vendor" if vendor_kind == "rental" else "Retailer Vendor" }}
+            </button>
+        {% endif %}
+    </div>
+
+    {% if vendors %}
+    <div class="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+        <input
+            type="text"
+            id="{{ section_id }}Filter"
+            placeholder="Search by Vendor ID, Name, or Location"
+            class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+        >
+    </div>
+
+    <div class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+                <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                        <th class="px-6 py-4 text-left font-semibold">Vendor ID</th>
+                        <th class="px-6 py-4 text-left font-semibold">Name</th>
+                        <th class="px-6 py-4 text-left font-semibold">Location</th>
+                        <th class="px-6 py-4 text-left font-semibold">Phone</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 text-slate-700" id="{{ section_id }}TableBody">
+                    {% for vendor in vendors %}
+                    <tr
+                        class="vendor-row transition hover:bg-slate-50"
+                        data-vendor-kind="{{ vendor_kind }}"
+                        data-vendor-id="{{ vendor.vendor_id }}"
+                        data-vendor-name="{{ vendor.vendor_name }}"
+                        data-vendor-place="{{ vendor.vendor_place or '' }}"
+                        data-vendor-phone="{{ vendor.phone or '' }}"
+                    >
+                        <td class="px-6 py-4 font-semibold text-slate-900">{{ vendor.vendor_id }}</td>
+                        <td class="px-6 py-4">{{ vendor.vendor_name }}</td>
+                        <td class="px-6 py-4">{{ vendor.vendor_place or '-' }}</td>
+                        <td class="px-6 py-4 relative {% if permissions.get('vendor_management') %}pr-40{% endif %}">
+                            <span>{{ vendor.phone or '-' }}</span>
+                            {% if permissions.get('vendor_management') %}
+                            <div class="vendor-row-actions" data-row-actions>
+                                <button type="button" class="vendor-row-action-btn js-open-edit-vendor">Modify</button>
+                                <button type="button" class="vendor-row-action-btn vendor-row-action-danger js-open-delete-vendor">Delete</button>
+                            </div>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <div class="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-600">
+        {{ empty_message }}
+    </div>
+    {% endif %}
+</section>
+{% endmacro %}
+
 {% block head %}
 <style>
 .vendor-row {
@@ -78,75 +154,34 @@
 {% block content %}
 <div class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100">
     <div class="mx-auto max-w-6xl px-4 py-10 lg:py-12" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
-        <div class="flex flex-wrap items-center justify-between gap-4">
-            <div>
-                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Directory</div>
-                <h1 class="mt-2 text-2xl font-semibold text-slate-900">Vendors</h1>
-                <p class="mt-1 text-sm text-slate-500">Manage partners and contact details.</p>
-            </div>
-            {% if permissions.get('vendor_management') %}
-                <button
-                    class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
-                    onclick="openAddVendorModal()"
-                >
-                    + Add New Vendor
-                </button>
-            {% endif %}
+        <div class="rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm backdrop-blur">
+            <div class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Directory</div>
+            <h1 class="mt-3 text-3xl font-semibold text-slate-900">Vendors</h1>
+            <p class="mt-2 max-w-3xl text-sm text-slate-500">
+                Manage the active retailer directory used in bookings and the separate rental genset directory
+                for marriage halls, guest houses, and hotels.
+            </p>
         </div>
 
-        {% if vendors %}
-        <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <input
-                type="text"
-                id="vendorFilter"
-                placeholder="Search by Vendor ID, Name, or Location"
-                class="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
-            >
-        </div>
+        {{ vendor_section(
+            "retailerVendor",
+            "Retailer Vendor",
+            "Primary vendor directory used by the existing booking workflow.",
+            vendors,
+            "retailer",
+            "No retailer vendors available yet.",
+            permissions
+        ) }}
 
-        <div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div class="overflow-x-auto">
-                <table class="min-w-full text-sm">
-                    <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                        <tr>
-                            <th class="px-6 py-4 text-left font-semibold">Vendor ID</th>
-                            <th class="px-6 py-4 text-left font-semibold">Name</th>
-                            <th class="px-6 py-4 text-left font-semibold">Location</th>
-                            <th class="px-6 py-4 text-left font-semibold">Phone</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-100 text-slate-700" id="vendorTable">
-                        {% for vendor in vendors %}
-                        <tr
-                            class="vendor-row transition hover:bg-slate-50"
-                            data-vendor-id="{{ vendor.vendor_id }}"
-                            data-vendor-name="{{ vendor.vendor_name }}"
-                            data-vendor-place="{{ vendor.vendor_place or '' }}"
-                            data-vendor-phone="{{ vendor.phone or '' }}"
-                        >
-                            <td class="px-6 py-4 font-semibold text-slate-900">{{ vendor.vendor_id }}</td>
-                            <td class="px-6 py-4">{{ vendor.vendor_name }}</td>
-                            <td class="px-6 py-4">{{ vendor.vendor_place or '-' }}</td>
-                            <td class="px-6 py-4 relative {% if permissions.get('vendor_management') %}pr-40{% endif %}">
-                                <span>{{ vendor.phone or '-' }}</span>
-                                {% if permissions.get('vendor_management') %}
-                                <div class="vendor-row-actions" data-row-actions>
-                                    <button type="button" class="vendor-row-action-btn js-open-edit-vendor">Modify</button>
-                                    <button type="button" class="vendor-row-action-btn vendor-row-action-danger js-open-delete-vendor">Delete</button>
-                                </div>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {% else %}
-        <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
-            No vendors loaded. Please check the data files in the Data/ folder.
-        </div>
-        {% endif %}
+        {{ vendor_section(
+            "rentalVendor",
+            "Rental Vendors",
+            "Separate rental genset records for marriage halls, guest houses, and hotels.",
+            rental_vendors or [],
+            "rental",
+            "No rental vendors available yet.",
+            permissions
+        ) }}
     </div>
 </div>
 
@@ -155,14 +190,15 @@
     <div class="w-full max-w-lg rounded-2xl bg-white shadow-xl">
         <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
             <div>
-                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">New Vendor</div>
-                <h2 class="mt-1 text-lg font-semibold text-slate-900">Add Vendor</h2>
+                <div id="addVendorBadge" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">New Vendor</div>
+                <h2 id="addVendorHeading" class="mt-1 text-lg font-semibold text-slate-900">Add Vendor</h2>
             </div>
             <button class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900" onclick="closeAddVendorModal()">
                 Close
             </button>
         </div>
         <form id="addVendorForm" onsubmit="submitAddVendor(event)" class="space-y-4 px-6 py-5">
+            <input id="addVendorKind" type="hidden" value="retailer">
             <div>
                 <label for="vendorName" class="text-sm font-semibold text-slate-700">Vendor Name <span class="text-rose-500">*</span></label>
                 <input
@@ -196,7 +232,7 @@
                 <button type="button" onclick="closeAddVendorModal()" class="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
                     Cancel
                 </button>
-                <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">
+                <button id="addVendorSubmit" type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">
                     Create Vendor
                 </button>
             </div>
@@ -208,14 +244,15 @@
     <div class="w-full max-w-lg rounded-2xl bg-white shadow-xl">
         <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
             <div>
-                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Vendor Profile</div>
-                <h2 class="mt-1 text-lg font-semibold text-slate-900">Edit Vendor</h2>
+                <div id="editVendorBadge" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Vendor Profile</div>
+                <h2 id="editVendorHeading" class="mt-1 text-lg font-semibold text-slate-900">Edit Vendor</h2>
             </div>
             <button type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900" onclick="closeEditVendorModal()">
                 Close
             </button>
         </div>
         <form id="editVendorForm" onsubmit="submitEditVendor(event)" class="space-y-4 px-6 py-5">
+            <input id="editVendorKind" type="hidden" value="retailer">
             <input id="editVendorId" type="hidden">
             <div>
                 <label for="editVendorIdDisplay" class="text-sm font-semibold text-slate-700">Vendor ID</label>
@@ -255,7 +292,7 @@
                 <button type="button" onclick="closeEditVendorModal()" class="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
                     Cancel
                 </button>
-                <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">
+                <button id="editVendorSubmit" type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">
                     Save Changes
                 </button>
             </div>
@@ -266,13 +303,13 @@
 <div id="deleteVendorModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
     <div class="w-full max-w-md rounded-2xl bg-white shadow-xl">
         <div class="border-b border-slate-200 px-6 py-4">
-            <h2 class="mt-1 text-lg font-semibold text-slate-900">Delete Vendor</h2>
+            <h2 id="deleteVendorHeading" class="mt-1 text-lg font-semibold text-slate-900">Delete Vendor</h2>
         </div>
         <div class="space-y-4 px-6 py-5">
             <p class="text-sm text-slate-600">
-                Delete vendor <span id="deleteVendorTarget" class="font-semibold text-slate-900">-</span>?
+                Delete <span id="deleteVendorTarget" class="font-semibold text-slate-900">-</span>?
             </p>
-            <p class="text-xs text-slate-500">
+            <p id="deleteVendorNote" class="text-xs text-slate-500">
                 This action is permanent. Vendors with existing bookings cannot be deleted.
             </p>
             <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
@@ -289,17 +326,24 @@
 {% endif %}
 
 <script>
-document.getElementById('vendorFilter')?.addEventListener('keyup', function() {
-    const filter = this.value.toUpperCase();
-    const tableBody = document.getElementById('vendorTable');
-    if (!tableBody) return;
-    const rows = tableBody.getElementsByTagName('tr');
+function setupVendorFilter(inputId, tableBodyId) {
+    const input = document.getElementById(inputId);
+    const tableBody = document.getElementById(tableBodyId);
+    if (!input || !tableBody) return;
 
-    for (let i = 0; i < rows.length; i++) {
-        const text = rows[i].textContent.toUpperCase();
-        rows[i].style.display = text.includes(filter) ? '' : 'none';
-    }
-});
+    input.addEventListener('keyup', function() {
+        const filter = this.value.toUpperCase();
+        const rows = tableBody.getElementsByTagName('tr');
+
+        for (let i = 0; i < rows.length; i++) {
+            const text = rows[i].textContent.toUpperCase();
+            rows[i].style.display = text.includes(filter) ? '' : 'none';
+        }
+    });
+}
+
+setupVendorFilter('retailerVendorFilter', 'retailerVendorTableBody');
+setupVendorFilter('rentalVendorFilter', 'rentalVendorTableBody');
 
 function openModal(modal) {
     if (!modal) return;
@@ -318,21 +362,73 @@ function readApiError(data, fallback) {
     return data.detail || data.message || fallback;
 }
 
+function vendorKindConfig(kind) {
+    if (kind === 'rental') {
+        return {
+            label: 'Rental Vendor',
+            pluralLabel: 'Rental Vendors',
+            endpoint: '/api/rental-vendors',
+            deleteNote: 'This action is permanent. Rental vendors can be deleted immediately.',
+        };
+    }
+
+    return {
+        label: 'Retailer Vendor',
+        pluralLabel: 'Retailer Vendors',
+        endpoint: '/api/vendors',
+        deleteNote: 'This action is permanent. Vendors with existing bookings cannot be deleted.',
+    };
+}
+
 const addVendorModal = document.getElementById('addVendorModal');
 const addVendorForm = document.getElementById('addVendorForm');
+const addVendorKindInput = document.getElementById('addVendorKind');
+const addVendorBadge = document.getElementById('addVendorBadge');
+const addVendorHeading = document.getElementById('addVendorHeading');
+const addVendorSubmit = document.getElementById('addVendorSubmit');
 const editVendorModal = document.getElementById('editVendorModal');
 const editVendorForm = document.getElementById('editVendorForm');
+const editVendorKindInput = document.getElementById('editVendorKind');
+const editVendorBadge = document.getElementById('editVendorBadge');
+const editVendorHeading = document.getElementById('editVendorHeading');
+const editVendorSubmit = document.getElementById('editVendorSubmit');
 const deleteVendorModal = document.getElementById('deleteVendorModal');
+const deleteVendorHeading = document.getElementById('deleteVendorHeading');
 const deleteVendorTarget = document.getElementById('deleteVendorTarget');
+const deleteVendorNote = document.getElementById('deleteVendorNote');
 const editVendorIdInput = document.getElementById('editVendorId');
 const editVendorIdDisplay = document.getElementById('editVendorIdDisplay');
 const editVendorName = document.getElementById('editVendorName');
 const editVendorPlace = document.getElementById('editVendorPlace');
 const editVendorPhone = document.getElementById('editVendorPhone');
-const vendorRows = Array.from(document.querySelectorAll('#vendorTable .vendor-row'));
+const vendorRows = Array.from(document.querySelectorAll('.vendor-row'));
 const isTouchLike = window.matchMedia('(hover: none), (pointer: coarse)').matches;
 let activeDeleteVendorId = '';
+let activeDeleteVendorKind = 'retailer';
 let activeTouchRow = null;
+
+function setAddVendorKind(kind) {
+    const config = vendorKindConfig(kind);
+    if (addVendorKindInput) addVendorKindInput.value = kind;
+    if (addVendorBadge) addVendorBadge.textContent = `New ${config.label}`;
+    if (addVendorHeading) addVendorHeading.textContent = `Add ${config.label}`;
+    if (addVendorSubmit) addVendorSubmit.textContent = `Create ${config.label}`;
+}
+
+function setEditVendorKind(kind) {
+    const config = vendorKindConfig(kind);
+    if (editVendorKindInput) editVendorKindInput.value = kind;
+    if (editVendorBadge) editVendorBadge.textContent = `${config.label} Profile`;
+    if (editVendorHeading) editVendorHeading.textContent = `Edit ${config.label}`;
+    if (editVendorSubmit) editVendorSubmit.textContent = `Save ${config.label}`;
+}
+
+function setDeleteVendorKind(kind) {
+    const config = vendorKindConfig(kind);
+    activeDeleteVendorKind = kind;
+    if (deleteVendorHeading) deleteVendorHeading.textContent = `Delete ${config.label}`;
+    if (deleteVendorNote) deleteVendorNote.textContent = config.deleteNote;
+}
 
 function closeActiveTouchRow() {
     if (!activeTouchRow) return;
@@ -340,13 +436,15 @@ function closeActiveTouchRow() {
     activeTouchRow = null;
 }
 
-function openAddVendorModal() {
+function openAddVendorModal(kind = 'retailer') {
+    setAddVendorKind(kind);
     openModal(addVendorModal);
 }
 
 function closeAddVendorModal() {
     closeModal(addVendorModal);
     addVendorForm?.reset();
+    setAddVendorKind('retailer');
     const placeInput = document.getElementById('vendorPlace');
     if (placeInput) {
         placeInput.value = 'Civil Line';
@@ -355,11 +453,13 @@ function closeAddVendorModal() {
 
 function openEditVendorModalForRow(row) {
     if (!row || !editVendorIdInput || !editVendorName || !editVendorPlace || !editVendorPhone || !editVendorIdDisplay) return;
+    const vendorKind = row.getAttribute('data-vendor-kind') || 'retailer';
     const vendorId = row.getAttribute('data-vendor-id') || '';
     const vendorName = row.getAttribute('data-vendor-name') || '';
     const vendorPlace = row.getAttribute('data-vendor-place') || '';
     const vendorPhone = row.getAttribute('data-vendor-phone') || '';
 
+    setEditVendorKind(vendorKind);
     editVendorIdInput.value = vendorId;
     editVendorIdDisplay.value = vendorId;
     editVendorName.value = vendorName;
@@ -371,17 +471,22 @@ function openEditVendorModalForRow(row) {
 function closeEditVendorModal() {
     closeModal(editVendorModal);
     editVendorForm?.reset();
+    setEditVendorKind('retailer');
     if (editVendorIdInput) editVendorIdInput.value = '';
     if (editVendorIdDisplay) editVendorIdDisplay.value = '';
 }
 
 function openDeleteVendorModalForRow(row) {
     if (!row) return;
+    const vendorKind = row.getAttribute('data-vendor-kind') || 'retailer';
     const vendorId = row.getAttribute('data-vendor-id') || '';
     const vendorName = row.getAttribute('data-vendor-name') || '';
+    const config = vendorKindConfig(vendorKind);
+
     activeDeleteVendorId = vendorId;
+    setDeleteVendorKind(vendorKind);
     if (deleteVendorTarget) {
-        deleteVendorTarget.textContent = `${vendorName || '-'} (${vendorId || '-'})`;
+        deleteVendorTarget.textContent = `${config.label}: ${vendorName || '-'} (${vendorId || '-'})`;
     }
     openModal(deleteVendorModal);
 }
@@ -389,6 +494,7 @@ function openDeleteVendorModalForRow(row) {
 function closeDeleteVendorModal() {
     closeModal(deleteVendorModal);
     activeDeleteVendorId = '';
+    setDeleteVendorKind('retailer');
     if (deleteVendorTarget) {
         deleteVendorTarget.textContent = '-';
     }
@@ -449,6 +555,8 @@ window.addEventListener('click', function(event) {
 async function submitAddVendor(e) {
     e.preventDefault();
 
+    const vendorKind = addVendorKindInput?.value || 'retailer';
+    const config = vendorKindConfig(vendorKind);
     const vendor_name = document.getElementById('vendorName')?.value.trim() || '';
     const vendor_place = document.getElementById('vendorPlace')?.value.trim() || 'Civil Line';
     const phone = document.getElementById('vendorPhone')?.value.trim() || '';
@@ -459,7 +567,7 @@ async function submitAddVendor(e) {
     }
 
     try {
-        const response = await fetch('/api/vendors', {
+        const response = await fetch(config.endpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -474,13 +582,13 @@ async function submitAddVendor(e) {
         const data = await response.json();
 
         if (response.ok) {
-            alert(`Vendor created successfully.\nVendor ID: ${data.vendor_id}`);
+            alert(`${config.label} created successfully.\nVendor ID: ${data.vendor_id}`);
             closeAddVendorModal();
             location.reload();
         } else if (response.status === 401) {
             window.location.href = '/login';
         } else {
-            const errorMessage = readApiError(data, 'Failed to create vendor');
+            const errorMessage = readApiError(data, `Failed to create ${config.label.toLowerCase()}`);
             alert(`Error: ${errorMessage}`);
         }
     } catch (error) {
@@ -490,6 +598,8 @@ async function submitAddVendor(e) {
 
 async function submitEditVendor(e) {
     e.preventDefault();
+    const vendorKind = editVendorKindInput?.value || 'retailer';
+    const config = vendorKindConfig(vendorKind);
     const vendorId = editVendorIdInput?.value || '';
     const vendor_name = editVendorName?.value.trim() || '';
     const vendor_place = editVendorPlace?.value.trim() || 'Civil Line';
@@ -505,7 +615,7 @@ async function submitEditVendor(e) {
     }
 
     try {
-        const response = await fetch(`/api/vendors/${encodeURIComponent(vendorId)}`, {
+        const response = await fetch(`${config.endpoint}/${encodeURIComponent(vendorId)}`, {
             method: 'PATCH',
             headers: {
                 'Content-Type': 'application/json',
@@ -520,13 +630,13 @@ async function submitEditVendor(e) {
         const data = await response.json();
 
         if (response.ok) {
-            alert('Vendor updated successfully.');
+            alert(`${config.label} updated successfully.`);
             closeEditVendorModal();
             location.reload();
         } else if (response.status === 401) {
             window.location.href = '/login';
         } else {
-            const errorMessage = readApiError(data, 'Failed to update vendor');
+            const errorMessage = readApiError(data, `Failed to update ${config.label.toLowerCase()}`);
             alert(`Error: ${errorMessage}`);
         }
     } catch (error) {
@@ -538,20 +648,22 @@ async function confirmDeleteVendor() {
     if (!activeDeleteVendorId) {
         return;
     }
+
+    const config = vendorKindConfig(activeDeleteVendorKind);
     try {
-        const response = await fetch(`/api/vendors/${encodeURIComponent(activeDeleteVendorId)}`, {
+        const response = await fetch(`${config.endpoint}/${encodeURIComponent(activeDeleteVendorId)}`, {
             method: 'DELETE',
         });
         const data = await response.json();
 
         if (response.ok) {
-            alert('Vendor deleted successfully.');
+            alert(`${config.label} deleted successfully.`);
             closeDeleteVendorModal();
             location.reload();
         } else if (response.status === 401) {
             window.location.href = '/login';
         } else {
-            const errorMessage = readApiError(data, 'Failed to delete vendor');
+            const errorMessage = readApiError(data, `Failed to delete ${config.label.toLowerCase()}`);
             alert(`Error: ${errorMessage}`);
         }
     } catch (error) {

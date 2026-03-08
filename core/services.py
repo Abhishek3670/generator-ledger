@@ -554,6 +554,9 @@ class ExportService:
             pd.read_sql_query("SELECT * FROM vendors", self.conn).to_csv(
                 os.path.join(out_dir, "Vendor_Dataset.csv"), index=False
             )
+            pd.read_sql_query("SELECT * FROM rental_vendors", self.conn).to_csv(
+                os.path.join(out_dir, "Rental_Vendor_Dataset.csv"), index=False
+            )
             
             self.logger.info(f"Data exported successfully | context={{'dir': '{out_dir}'}}")
             
@@ -732,28 +735,74 @@ def create_vendor(
     """
     Create a new vendor, ensuring no conflict with existing vendors.
     """
+    return _create_directory_vendor(
+        conn,
+        table_name="vendors",
+        vendor_id=vendor_id,
+        vendor_name=vendor_name,
+        vendor_place=vendor_place,
+        phone=phone,
+        entity_label="vendor",
+    )
+
+
+def create_rental_vendor(
+    conn: sqlite3.Connection,
+    vendor_id: str,
+    vendor_name: str,
+    vendor_place: str = "",
+    phone: str = ""
+) -> Tuple[bool, str]:
+    """
+    Create a new rental vendor, ensuring no conflict with existing rental vendors.
+    """
+    return _create_directory_vendor(
+        conn,
+        table_name="rental_vendors",
+        vendor_id=vendor_id,
+        vendor_name=vendor_name,
+        vendor_place=vendor_place,
+        phone=phone,
+        entity_label="rental vendor",
+    )
+
+
+def _create_directory_vendor(
+    conn: sqlite3.Connection,
+    table_name: str,
+    vendor_id: str,
+    vendor_name: str,
+    vendor_place: str = "",
+    phone: str = "",
+    entity_label: str = "vendor",
+) -> Tuple[bool, str]:
+    """
+    Create a new vendor-style directory record inside the given table.
+    """
     cur = conn.cursor()
     
     # Check if vendor ID already exists
-    cur.execute("SELECT vendor_id FROM vendors WHERE vendor_id = ?", (vendor_id,))
+    cur.execute(f"SELECT vendor_id FROM {table_name} WHERE vendor_id = ?", (vendor_id,))
     if cur.fetchone():
-        return False, f"Vendor ID '{vendor_id}' already exists"
+        return False, f"{entity_label.title()} ID '{vendor_id}' already exists"
     
     # Check if vendor name already exists (case-insensitive)
     cur.execute(
-        "SELECT vendor_id FROM vendors WHERE LOWER(vendor_name) = LOWER(?)",
-        (vendor_name,)
+        f"SELECT vendor_id FROM {table_name} WHERE LOWER(vendor_name) = LOWER(?)",
+        (vendor_name,),
     )
     duplicate = cur.fetchone()
     if duplicate:
-        return False, f"Vendor name '{vendor_name}' already exists with ID '{duplicate[0]}'"
+        return False, (
+            f"{entity_label.title()} name '{vendor_name}' already exists with ID '{duplicate[0]}'"
+        )
     
-    # Create the new vendor
+    # Create the new vendor record
     cur.execute(
-        """INSERT INTO vendors (vendor_id, vendor_name, vendor_place, phone)
+        f"""INSERT INTO {table_name} (vendor_id, vendor_name, vendor_place, phone)
         VALUES (?, ?, ?, ?)""",
-        (vendor_id, vendor_name, vendor_place, phone)
+        (vendor_id, vendor_name, vendor_place, phone),
     )
     conn.commit()
     
-    return True, f"✓ Created vendor '{vendor_id}' - {vendor_name}"
+    return True, f"✓ Created {entity_label} '{vendor_id}' - {vendor_name}"

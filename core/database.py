@@ -62,6 +62,13 @@ class DatabaseManager:
                 vendor_place TEXT,
                 phone TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS rental_vendors (
+                vendor_id TEXT PRIMARY KEY,
+                vendor_name TEXT NOT NULL,
+                vendor_place TEXT,
+                phone TEXT
+            );
             
             CREATE TABLE IF NOT EXISTS bookings (
                 booking_id TEXT PRIMARY KEY,
@@ -138,7 +145,13 @@ class DatabaseManager:
                 next_val INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS rental_vendor_id_seq (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                next_val INTEGER NOT NULL
+            );
+
             INSERT OR IGNORE INTO vendor_id_seq (id, next_val) VALUES (1, 1);
+            INSERT OR IGNORE INTO rental_vendor_id_seq (id, next_val) VALUES (1, 1);
 
             CREATE INDEX IF NOT EXISTS idx_booking_items_generator 
                 ON booking_items(generator_id, item_status);
