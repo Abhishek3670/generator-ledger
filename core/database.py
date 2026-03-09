@@ -6,7 +6,12 @@ import sqlite3
 import logging
 from typing import Optional
 
-from config import STATUS_CONFIRMED, GEN_STATUS_ACTIVE, OWNER_USERNAME
+from config import (
+    STATUS_CONFIRMED,
+    GEN_STATUS_ACTIVE,
+    OWNER_USERNAME,
+    GEN_INVENTORY_RETAILER,
+)
 from .observability import connect_sqlite
 
 
@@ -53,7 +58,8 @@ class DatabaseManager:
                 identification TEXT,
                 type TEXT,
                 status TEXT DEFAULT '{GEN_STATUS_ACTIVE}',
-                notes TEXT
+                notes TEXT,
+                inventory_type TEXT DEFAULT '{GEN_INVENTORY_RETAILER}'
             );
             
             CREATE TABLE IF NOT EXISTS vendors (
@@ -189,6 +195,29 @@ class DatabaseManager:
                 )
 
             # Ensure booking_history has user column for audit trail
+            cur.execute("PRAGMA table_info(generators)")
+            generator_cols = {row[1] for row in cur.fetchall()}
+            if "inventory_type" not in generator_cols:
+                cur.execute(
+                    f"ALTER TABLE generators ADD COLUMN inventory_type TEXT DEFAULT '{GEN_INVENTORY_RETAILER}'"
+                )
+
+            cur.execute(
+                """
+                UPDATE generators
+                SET inventory_type = ?
+                WHERE inventory_type IS NULL OR TRIM(inventory_type) = ''
+                """,
+                (GEN_INVENTORY_RETAILER,),
+            )
+
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_generators_inventory_type
+                ON generators(inventory_type, generator_id)
+                """
+            )
+
             cur.execute("PRAGMA table_info(booking_history)")
             existing_cols = {row[1] for row in cur.fetchall()}
             if "user" not in existing_cols:

@@ -6,7 +6,11 @@ import sqlite3
 import logging
 from typing import Optional, List, Dict, Any
 
-from config import STATUS_CONFIRMED
+from config import (
+    STATUS_CONFIRMED,
+    GEN_INVENTORY_RETAILER,
+    GEN_INVENTORY_EMERGENCY,
+)
 
 from .models import (
     Generator,
@@ -16,6 +20,7 @@ from .models import (
     BookingItem,
     BookingHistory,
     GeneratorStatus,
+    normalize_generator_inventory_type,
     User,
     UserSession,
 )
@@ -23,82 +28,115 @@ from .models import (
 
 class GeneratorRepository:
     """Repository for generator data access."""
+
+    GENERATOR_COLUMNS = (
+        "generator_id, capacity_kva, identification, type, status, notes, inventory_type"
+    )
     
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
         self.logger = logging.getLogger(self.__class__.__name__)
-    
-    def get_by_id(self, generator_id: str) -> Optional[Generator]:
-        cur = self.conn.cursor()
-        cur.execute("SELECT * FROM generators WHERE generator_id = ?", (generator_id,))
-        row = cur.fetchone()
-        
-        if not row:
-            return None
-        
+
+    def _row_to_model(self, row: Any) -> Generator:
         return Generator(
             generator_id=row[0],
             capacity_kva=row[1],
             identification=row[2] or "",
             type=row[3] or "",
             status=row[4] or GeneratorStatus.ACTIVE.value,
-            notes=row[5] or ""
+            notes=row[5] or "",
+            inventory_type=normalize_generator_inventory_type(row[6] if len(row) > 6 else None),
         )
     
-    def find_by_capacity(self, capacity_kva: int, status: str = GeneratorStatus.ACTIVE.value) -> List[Generator]:
+    def get_by_id(self, generator_id: str) -> Optional[Generator]:
         cur = self.conn.cursor()
         cur.execute(
-            """SELECT * FROM generators 
-               WHERE capacity_kva = ? AND status = ?
-               ORDER BY generator_id""",
-            (capacity_kva, status)
+            f"SELECT {self.GENERATOR_COLUMNS} FROM generators WHERE generator_id = ?",
+            (generator_id,),
         )
+        row = cur.fetchone()
         
-        generators = []
-        for row in cur.fetchall():
-            generators.append(Generator(
-                generator_id=row[0],
-                capacity_kva=row[1],
-                identification=row[2] or "",
-                type=row[3] or "",
-                status=row[4] or GeneratorStatus.ACTIVE.value,
-                notes=row[5] or ""
-            ))
-        return generators
+        if not row:
+            return None
+
+        return self._row_to_model(row)
+
+    def find_by_capacity(
+        self,
+        capacity_kva: int,
+        status: str = GeneratorStatus.ACTIVE.value,
+        inventory_type: Optional[str] = None,
+    ) -> List[Generator]:
+        cur = self.conn.cursor()
+        query = [
+            f"SELECT {self.GENERATOR_COLUMNS} FROM generators",
+            "WHERE capacity_kva = ? AND status = ?",
+        ]
+        params: List[Any] = [capacity_kva, status]
+        if inventory_type:
+            query.append("AND inventory_type = ?")
+            params.append(normalize_generator_inventory_type(inventory_type))
+        query.append(
+            "ORDER BY CASE inventory_type "
+            f"WHEN '{GEN_INVENTORY_RETAILER}' THEN 0 "
+            f"WHEN '{GEN_INVENTORY_EMERGENCY}' THEN 1 "
+            "ELSE 2 END, generator_id"
+        )
+
+        cur.execute(" ".join(query), tuple(params))
+        return [self._row_to_model(row) for row in cur.fetchall()]
     
     def save(self, generator: Generator) -> None:
         try:
             cur = self.conn.cursor()
             cur.execute(
                 """INSERT OR REPLACE INTO generators
-                (generator_id, capacity_kva, identification, type, status, notes)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                (generator.generator_id, generator.capacity_kva, generator.identification,
-                 generator.type, generator.status, generator.notes)
+                (generator_id, capacity_kva, identification, type, status, notes, inventory_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    generator.generator_id,
+                    generator.capacity_kva,
+                    generator.identification,
+                    generator.type,
+                    generator.status,
+                    generator.notes,
+                    normalize_generator_inventory_type(generator.inventory_type),
+                ),
             )
             self.conn.commit()
         except sqlite3.Error:
             self.logger.error(f"Failed to save generator | context={{'id': '{generator.generator_id}'}}", exc_info=True)
             raise
-    
-    def get_all(self) -> List[Generator]:
-        cur = self.conn.cursor()
-        cur.execute("SELECT * FROM generators ORDER BY generator_id")
-        generators = []
-        for row in cur.fetchall():
-            generators.append(Generator(
-                generator_id=row[0],
-                capacity_kva=row[1],
-                identification=row[2] or "",
-                type=row[3] or "",
-                status=row[4] or GeneratorStatus.ACTIVE.value,
-                notes=row[5] or ""
-            ))
-        return generators
 
-    def count_by_capacity(self, capacity_kva: int) -> int:
+    def get_all(self, inventory_type: Optional[str] = None) -> List[Generator]:
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM generators WHERE capacity_kva = ?", (capacity_kva,))
+        query = [f"SELECT {self.GENERATOR_COLUMNS} FROM generators"]
+        params: List[Any] = []
+        if inventory_type:
+            query.append("WHERE inventory_type = ?")
+            params.append(normalize_generator_inventory_type(inventory_type))
+        query.append(
+            "ORDER BY CASE inventory_type "
+            f"WHEN '{GEN_INVENTORY_RETAILER}' THEN 0 "
+            f"WHEN '{GEN_INVENTORY_EMERGENCY}' THEN 1 "
+            "ELSE 2 END, generator_id"
+        )
+        cur.execute(" ".join(query), tuple(params))
+        return [self._row_to_model(row) for row in cur.fetchall()]
+
+    def count_by_capacity(self, capacity_kva: int, inventory_type: Optional[str] = None) -> int:
+        cur = self.conn.cursor()
+        if inventory_type:
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM generators
+                WHERE capacity_kva = ? AND inventory_type = ?
+                """,
+                (capacity_kva, normalize_generator_inventory_type(inventory_type)),
+            )
+        else:
+            cur.execute("SELECT COUNT(*) FROM generators WHERE capacity_kva = ?", (capacity_kva,))
         row = cur.fetchone()
         return int(row[0]) if row and row[0] is not None else 0
 
@@ -342,11 +380,14 @@ class BookingRepository:
         cur = self.conn.cursor()
         cur.execute(
             """
-            SELECT bi.generator_id,
+            SELECT bi.id,
+                   bi.generator_id,
                    bi.start_dt,
+                   bi.end_dt,
                    bi.item_status,
                    bi.remarks,
-                   g.capacity_kva
+                   g.capacity_kva,
+                   g.inventory_type
             FROM booking_items bi
             LEFT JOIN generators g ON g.generator_id = bi.generator_id
             WHERE bi.booking_id = ?
@@ -356,11 +397,14 @@ class BookingRepository:
         )
         return [
             {
-                "generator_id": row[0] or "",
-                "start_dt": row[1] or "",
-                "item_status": row[2] or "",
-                "remarks": row[3] or "",
-                "capacity_kva": row[4],
+                "id": row[0],
+                "generator_id": row[1] or "",
+                "start_dt": row[2] or "",
+                "end_dt": row[3] or "",
+                "item_status": row[4] or "",
+                "remarks": row[5] or "",
+                "capacity_kva": row[6],
+                "inventory_type": normalize_generator_inventory_type(row[7] if row[7] else None),
             }
             for row in cur.fetchall()
         ]
@@ -491,6 +535,7 @@ class BookingRepository:
                    bi.id,
                    bi.generator_id,
                    g.capacity_kva,
+                   g.inventory_type,
                    bi.start_dt,
                    bi.end_dt,
                    bi.item_status,
@@ -511,10 +556,11 @@ class BookingRepository:
                 "item_id": row[3],
                 "generator_id": row[4],
                 "capacity_kva": row[5],
-                "start_dt": row[6],
-                "end_dt": row[7],
-                "item_status": row[8],
-                "remarks": row[9] or "",
+                "inventory_type": normalize_generator_inventory_type(row[6] if row[6] else None),
+                "start_dt": row[7],
+                "end_dt": row[8],
+                "item_status": row[9],
+                "remarks": row[10] or "",
             }
             for row in cur.fetchall()
         ]
@@ -533,7 +579,8 @@ class BookingRepository:
                    b.booking_id,
                    date(bi.start_dt) AS booked_date,
                    bi.generator_id,
-                   g.capacity_kva
+                   g.capacity_kva,
+                   g.inventory_type
             FROM booking_items bi
             JOIN bookings b ON b.booking_id = bi.booking_id
             JOIN vendors v ON v.vendor_id = b.vendor_id
@@ -559,6 +606,7 @@ class BookingRepository:
                 "booked_date": row[3],
                 "generator_id": row[4],
                 "capacity_kva": row[5],
+                "inventory_type": normalize_generator_inventory_type(row[6] if row[6] else None),
             }
             for row in cur.fetchall()
         ]

@@ -5,6 +5,7 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 
+from config import GEN_INVENTORY_EMERGENCY
 from core.database import DatabaseManager
 from core.models import Booking, BookingItem, Generator, Vendor
 from core.repositories import BookingRepository, GeneratorRepository, VendorRepository
@@ -187,3 +188,45 @@ def test_bookings_page_does_not_render_action_column_or_grouped_action_cell(app_
     assert ">Action<" not in html
     assert "js-booking-action-cell" not in html
     assert 'class="js-view-booking' not in html
+
+
+def test_bookings_page_marks_emergency_generators_in_red(app_client_and_conn):
+    _web_app_module, client, conn = app_client_and_conn
+
+    vendor_repo = VendorRepository(conn)
+    generator_repo = GeneratorRepository(conn)
+    booking_repo = BookingRepository(conn)
+
+    vendor_repo.save(Vendor(vendor_id="VEN010", vendor_name="Emergency Vendor"))
+    generator_repo.save(
+        Generator(
+            generator_id="EMG-65-01",
+            capacity_kva=65,
+            inventory_type=GEN_INVENTORY_EMERGENCY,
+        )
+    )
+    booking_repo.save(
+        Booking(
+            booking_id="BKG-20260301-00001",
+            vendor_id="VEN010",
+            created_at="2026-03-01 10:30",
+            status="Confirmed",
+        )
+    )
+    booking_repo.save_item(
+        BookingItem(
+            booking_id="BKG-20260301-00001",
+            generator_id="EMG-65-01",
+            start_dt="2026-03-02 00:00",
+            end_dt="2026-03-02 23:59",
+            item_status="Confirmed",
+            remarks="Emergency assignment",
+        )
+    )
+
+    response = client.get("/bookings", headers=_auth_headers(client))
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'data-generator-inventory="emergency"' in html
+    assert "font-semibold text-rose-700" in html

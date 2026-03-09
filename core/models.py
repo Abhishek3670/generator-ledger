@@ -13,6 +13,8 @@ from config import (
     GEN_STATUS_ACTIVE,
     GEN_STATUS_INACTIVE,
     GEN_STATUS_MAINTENANCE,
+    GEN_INVENTORY_RETAILER,
+    GEN_INVENTORY_EMERGENCY,
 )
 
 
@@ -30,6 +32,21 @@ class GeneratorStatus(Enum):
     MAINTENANCE = GEN_STATUS_MAINTENANCE
 
 
+class GeneratorInventoryType(Enum):
+    """Generator inventory grouping for operational fallback stock."""
+    RETAILER = GEN_INVENTORY_RETAILER
+    EMERGENCY = GEN_INVENTORY_EMERGENCY
+
+
+def normalize_generator_inventory_type(value: Optional[str]) -> str:
+    """Normalize generator inventory type to a supported persisted value."""
+    candidate = (value or "").strip().lower()
+    supported = {item.value for item in GeneratorInventoryType}
+    if candidate in supported:
+        return candidate
+    return GeneratorInventoryType.RETAILER.value
+
+
 @dataclass
 class Generator:
     """Generator data model."""
@@ -39,6 +56,7 @@ class Generator:
     type: str = ""
     status: str = GeneratorStatus.ACTIVE.value
     notes: str = ""
+    inventory_type: str = GeneratorInventoryType.RETAILER.value
 
 
 @dataclass

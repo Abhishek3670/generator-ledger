@@ -13,6 +13,8 @@ from .models import (
     User,
     BookingStatus,
     GeneratorStatus,
+    GeneratorInventoryType,
+    normalize_generator_inventory_type,
 )
 from .database import DatabaseManager
 from .repositories import (
@@ -28,6 +30,7 @@ from .services import (
     AvailabilityChecker,
     ExportService,
     DataLoader,
+    RetailerOutOfStockError,
 )
 from .utils import DateTimeParser
 
@@ -41,6 +44,8 @@ __all__ = [
     "User",
     "BookingStatus",
     "GeneratorStatus",
+    "GeneratorInventoryType",
+    "normalize_generator_inventory_type",
     "DatabaseManager",
     "GeneratorRepository",
     "VendorRepository",
@@ -52,5 +57,6 @@ __all__ = [
     "AvailabilityChecker",
     "ExportService",
     "DataLoader",
+    "RetailerOutOfStockError",
     "DateTimeParser",
 ]

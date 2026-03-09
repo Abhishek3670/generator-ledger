@@ -9,9 +9,11 @@ import logging
 from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime
 
+from config import GEN_INVENTORY_RETAILER, GEN_INVENTORY_EMERGENCY
+
 from .models import (
     Generator, Vendor, Booking, BookingItem, BookingHistory,
-    BookingStatus, GeneratorStatus
+    BookingStatus, GeneratorStatus, normalize_generator_inventory_type
 )
 from .repositories import (
     GeneratorRepository, VendorRepository, BookingRepository, BookingHistoryRepository
@@ -63,6 +65,23 @@ def log_booking_history(
         )
 
 
+class RetailerOutOfStockError(RuntimeError):
+    """Raised when retailer stock is unavailable but emergency alternatives exist."""
+
+    def __init__(self, affected_dates: List[Dict[str, Any]]):
+        self.affected_dates = affected_dates
+        self.payload = {
+            "success": False,
+            "error_code": "retailer_out_of_stock",
+            "message": (
+                "Retailer gensets are unavailable for one or more selected dates. "
+                "Review the emergency genset suggestions below."
+            ),
+            "affected_dates": affected_dates,
+        }
+        super().__init__(self.payload["message"])
+
+
 class AvailabilityChecker:
     """Checks generator availability and finds conflicts."""
     
@@ -112,19 +131,47 @@ class AvailabilityChecker:
         needed: int = 1
     ) -> List[str]:
         """Find available generators of specified capacity."""
+        generators = self.find_available_generators(
+            capacity_kva,
+            start_dt,
+            end_dt,
+            needed=needed,
+        )
+        return [generator.generator_id for generator in generators]
+
+    def find_available_generators(
+        self,
+        capacity_kva: int,
+        start_dt: str,
+        end_dt: str,
+        needed: Optional[int] = 1,
+        inventory_type: Optional[str] = None,
+    ) -> List[Generator]:
+        """Find available generators of specified capacity with optional inventory filtering."""
         gen_repo = GeneratorRepository(self.conn)
-        candidates = gen_repo.find_by_capacity(capacity_kva, GeneratorStatus.ACTIVE.value)
+        normalized_inventory_type = None
+        if inventory_type:
+            normalized_inventory_type = normalize_generator_inventory_type(inventory_type)
+        candidates = gen_repo.find_by_capacity(
+            capacity_kva,
+            GeneratorStatus.ACTIVE.value,
+            inventory_type=normalized_inventory_type,
+        )
         
         available = []
         for gen in candidates:
             is_avail, _ = self.is_available(gen.generator_id, start_dt, end_dt)
             if is_avail:
-                available.append(gen.generator_id)
-                if len(available) >= needed:
+                available.append(gen)
+                if needed is not None and len(available) >= needed:
                     break
         
         if not available:
-            self.logger.info(f"No available generators found | context={{'capacity': {capacity_kva}, 'start': '{start_dt}'}}")
+            inventory_context = normalized_inventory_type or "any"
+            self.logger.info(
+                "No available generators found | context="
+                f"{{'capacity': {capacity_kva}, 'start': '{start_dt}', 'inventory_type': '{inventory_context}'}}"
+            )
         
         return available
 
@@ -196,7 +243,7 @@ class BookingService:
         if existing_booking_id:
             self.logger.info(f"Merging new items into existing booking | context={{'vendor_id': '{vendor_id}', 'existing_booking': '{existing_booking_id}', 'new_items': {len(items)}}}")
             # Validate and add items to existing booking
-            prepared_items = self._validate_items(items)
+            prepared_items = self._validate_items(items, prompt_emergency_fallback=True)
             
             # Save items to existing booking
             with transaction(self.conn):
@@ -236,7 +283,7 @@ class BookingService:
             raise ValueError(f"Booking '{booking_id}' already exists")
         
         # FIRST: Validate and prepare ALL items (without saving)
-        prepared_items = self._validate_items(items)
+        prepared_items = self._validate_items(items, prompt_emergency_fallback=True)
         
         # SECOND: All items validated - now save to database
         # Create booking and items in one transaction
@@ -273,9 +320,25 @@ class BookingService:
         self.logger.info(f"Booking created successfully | context={{'booking_id': '{booking_id}', 'items_saved': {len(prepared_items)}}}")
         return booking_id
     
-    def _validate_items(self, items: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    def _format_emergency_option(self, generator: Generator) -> Dict[str, Any]:
+        """Serialize emergency generator metadata for fallback suggestions."""
+        return {
+            "generator_id": generator.generator_id,
+            "capacity_kva": generator.capacity_kva,
+            "identification": generator.identification,
+            "type": generator.type,
+            "notes": generator.notes,
+            "inventory_type": normalize_generator_inventory_type(generator.inventory_type),
+        }
+
+    def _validate_items(
+        self,
+        items: List[Dict[str, Any]],
+        prompt_emergency_fallback: bool = False,
+    ) -> List[Dict[str, str]]:
         """Validate all items and return prepared item data."""
         prepared_items = []
+        fallback_suggestions: List[Dict[str, Any]] = []
         for idx, item_spec in enumerate(items):
             generator_id = item_spec.get("generator_id")
             remarks = item_spec.get("remarks", "")
@@ -299,23 +362,70 @@ class BookingService:
                 capacity_kva = item_spec.get("capacity_kva")
                 if capacity_kva is None:
                     raise ValueError(f"Item {idx + 1}: Provide generator_id or capacity_kva")
-                
-                available = self.availability.find_available(
-                    int(capacity_kva), start_dt, end_dt, needed=1
-                )
-                if not available:
-                    self.logger.warning(f"Auto-assign failed | context={{'capacity': {capacity_kva}, 'start': '{start_dt}'}}")
-                    
-                    # Get total count of generators with this capacity
-                    total_gens = len(self.generator_repo.find_by_capacity(int(capacity_kva), GeneratorStatus.ACTIVE.value))
-                    
-                    raise RuntimeError(
-                        f"Item {idx + 1}: No available {capacity_kva} kVA generator "
-                        f"for {start_dt} - {end_dt}. "
-                        f"({total_gens} generator(s) exist but all are booked on this date. "
-                        f"Please try a different date or select a different capacity.)"
+
+                normalized_capacity = int(capacity_kva)
+
+                if prompt_emergency_fallback:
+                    retailer_available = self.availability.find_available_generators(
+                        normalized_capacity,
+                        start_dt,
+                        end_dt,
+                        needed=1,
+                        inventory_type=GEN_INVENTORY_RETAILER,
                     )
-                generator_id = available[0]
+                    if retailer_available:
+                        generator_id = retailer_available[0].generator_id
+                    else:
+                        emergency_available = self.availability.find_available_generators(
+                            normalized_capacity,
+                            start_dt,
+                            end_dt,
+                            needed=None,
+                            inventory_type=GEN_INVENTORY_EMERGENCY,
+                        )
+                        if emergency_available:
+                            date_key = start_dt.split()[0]
+                            fallback_suggestions.append(
+                                {
+                                    "item_index": idx,
+                                    "date": date_key,
+                                    "capacity_kva": normalized_capacity,
+                                    "suggested_generator_id": emergency_available[0].generator_id,
+                                    "emergency_options": [
+                                        self._format_emergency_option(generator)
+                                        for generator in emergency_available
+                                    ],
+                                }
+                            )
+                            continue
+
+                        self.logger.warning(
+                            "Retailer and emergency stock unavailable | context="
+                            f"{{'capacity': {normalized_capacity}, 'start': '{start_dt}'}}"
+                        )
+                        raise RuntimeError(
+                            f"Item {idx + 1}: No retailer or emergency {normalized_capacity} kVA generator "
+                            f"is available for {start_dt} - {end_dt}. "
+                            "Please try a different date or select another capacity."
+                        )
+
+                else:
+                    available = self.availability.find_available(
+                        normalized_capacity, start_dt, end_dt, needed=1
+                    )
+                    if not available:
+                        self.logger.warning(f"Auto-assign failed | context={{'capacity': {capacity_kva}, 'start': '{start_dt}'}}")
+                        
+                        # Get total count of generators with this capacity
+                        total_gens = len(self.generator_repo.find_by_capacity(normalized_capacity, GeneratorStatus.ACTIVE.value))
+                        
+                        raise RuntimeError(
+                            f"Item {idx + 1}: No available {capacity_kva} kVA generator "
+                            f"for {start_dt} - {end_dt}. "
+                            f"({total_gens} generator(s) exist but all are booked on this date. "
+                            f"Please try a different date or select a different capacity.)"
+                        )
+                    generator_id = available[0]
             else:
                 # Validate generator exists
                 try:
@@ -345,7 +455,14 @@ class BookingService:
                 "end_dt": end_dt,
                 "remarks": remarks
             })
-        
+
+        if fallback_suggestions:
+            self.logger.info(
+                "Retailer stock unavailable, emergency suggestions prepared | context="
+                f"{{'affected_dates': {len(fallback_suggestions)}}}"
+            )
+            raise RetailerOutOfStockError(fallback_suggestions)
+
         return prepared_items
     
     def add_generator(
@@ -602,7 +719,10 @@ class DataLoader:
                             identification=str(row.get("Identification", "")) or "",
                             type=str(row.get("Type", "")) or "",
                             status=str(row.get("Status", GeneratorStatus.ACTIVE.value)) or GeneratorStatus.ACTIVE.value,
-                            notes=str(row.get("Notes", "")) or ""
+                            notes=str(row.get("Notes", "")) or "",
+                            inventory_type=normalize_generator_inventory_type(
+                                str(row.get("Inventory_Type", ""))
+                            ),
                         )
                         self.generator_repo.save(generator)
                         loaded_count += 1

@@ -78,7 +78,15 @@
                         <tbody class="divide-y divide-slate-100 text-slate-700">
                             {% for item_info in items %}
                             <tr data-item-id="{{ item_info.item.id }}" class="transition hover:bg-slate-50">
-                                <td class="px-6 py-4 font-semibold text-slate-900">{{ item_info.generator_name }}</td>
+                                <td class="px-6 py-4">
+                                    {% if item_info.is_emergency %}
+                                    <span data-generator-inventory="emergency" class="font-semibold text-rose-700">
+                                        {{ item_info.generator_name }}
+                                    </span>
+                                    {% else %}
+                                    <span data-generator-inventory="retailer" class="font-semibold text-slate-900">{{ item_info.generator_name }}</span>
+                                    {% endif %}
+                                </td>
                                 <td class="px-6 py-4">
                                     <input type="date" class="booked-date w-44 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200" value="{{ item_info.item.start_dt.split(' ')[0] }}" {% if not can_update_booking %}disabled{% endif %}>
                                 </td>

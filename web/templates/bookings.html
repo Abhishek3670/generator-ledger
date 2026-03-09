@@ -117,8 +117,14 @@
                                             {% if date_row.gensets %}
                                             <ul class="space-y-1">
                                                 {% for genset in date_row.gensets %}
-                                                <li class="text-slate-700">
+                                                <li data-generator-inventory="{{ genset.inventory_type }}" class="{% if genset.is_emergency %}text-rose-700{% else %}text-slate-700{% endif %}">
+                                                    {% if genset.is_emergency %}
+                                                    <span class="font-semibold text-rose-700">
+                                                        {{ genset.label }}
+                                                    </span>
+                                                    {% else %}
                                                     {{ genset.label }}
+                                                    {% endif %}
                                                 </li>
                                                 {% endfor %}
                                             </ul>
@@ -511,6 +517,18 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function isEmergencyInventory(inventoryType) {
+    return String(inventoryType ?? '').trim().toLowerCase() === 'emergency';
+}
+
+function renderInventoryLabelHtml(label, inventoryType) {
+    const safeLabel = escapeHtml(label || '-');
+    if (isEmergencyInventory(inventoryType)) {
+        return `<span data-generator-inventory="emergency" class="font-semibold text-rose-700">${safeLabel}</span>`;
+    }
+    return `<span data-generator-inventory="retailer" class="text-slate-700">${safeLabel}</span>`;
+}
+
 function renderOverlayItems(items) {
     if (!items || items.length === 0) {
         overlayItems.innerHTML = '<div class="text-sm text-slate-500">No items in this booking.</div>';
@@ -527,7 +545,11 @@ function renderOverlayItems(items) {
                 remarks: []
             };
         }
-        grouped[bookedDate].generators.push(item.generator_id || '-');
+        grouped[bookedDate].generators.push({
+            generator_id: item.generator_id || '-',
+            capacity_kva: item.capacity_kva,
+            inventory_type: item.inventory_type || '',
+        });
         if (item.status) {
             grouped[bookedDate].statuses.push(item.status);
         }
@@ -562,8 +584,13 @@ function renderOverlayItems(items) {
             ? Array.from(new Set(row.remarks)).join(' | ')
             : '-';
 
-        const generatorList = row.generators.map(generatorId => (
-            `<li class="text-slate-700">${escapeHtml(generatorId)}</li>`
+        const generatorList = row.generators.map(generator => (
+            `<li>${renderInventoryLabelHtml(
+                generator.capacity_kva == null
+                    ? generator.generator_id
+                    : `${generator.generator_id} (${generator.capacity_kva} kVA)`,
+                generator.inventory_type
+            )}</li>`
         )).join('');
 
         return `

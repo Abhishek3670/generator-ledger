@@ -67,7 +67,15 @@
                         <tbody class="divide-y divide-slate-100 text-slate-700">
                             {% for item_info in items %}
                             <tr class="transition hover:bg-slate-50">
-                                <td class="px-6 py-4 font-semibold text-slate-900">{{ item_info.generator_name }}</td>
+                                <td class="px-6 py-4">
+                                    {% if item_info.is_emergency %}
+                                    <span data-generator-inventory="emergency" class="font-semibold text-rose-700">
+                                        {{ item_info.generator_name }}
+                                    </span>
+                                    {% else %}
+                                    <span data-generator-inventory="retailer" class="font-semibold text-slate-900">{{ item_info.generator_name }}</span>
+                                    {% endif %}
+                                </td>
                                 <td class="px-6 py-4">{{ item_info.item.start_dt.split(' ')[0] }}</td>
                                 <td class="px-6 py-4">
                                     <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold

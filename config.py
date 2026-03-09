@@ -73,6 +73,9 @@ GEN_STATUS_ACTIVE = "Active"
 GEN_STATUS_INACTIVE = "Inactive"
 GEN_STATUS_MAINTENANCE = "Maintenance"
 
+GEN_INVENTORY_RETAILER = "retailer"
+GEN_INVENTORY_EMERGENCY = "emergency"
+
 
 def setup_logging():
     """Configures the application-wide logger to write to file and console."""

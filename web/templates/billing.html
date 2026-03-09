@@ -327,6 +327,18 @@
             .replace(/'/g, '&#39;');
     }
 
+    function isEmergencyInventory(inventoryType) {
+        return String(inventoryType || '').trim().toLowerCase() === 'emergency';
+    }
+
+    function renderBillingGeneratorHtml(label, inventoryType) {
+        const safeLabel = escapeHtml(label || '-');
+        if (isEmergencyInventory(inventoryType)) {
+            return `<span data-generator-inventory="emergency" class="font-semibold text-rose-700">${safeLabel}</span>`;
+        }
+        return `<span data-generator-inventory="retailer" class="text-slate-700">${safeLabel}</span>`;
+    }
+
     function setFilterError(message) {
         if (!filterError) return;
         if (!message) {
@@ -684,7 +696,7 @@
                         </td>
                         <td class="px-3 py-3">${escapeHtml(dateLabel)}</td>
                         <td class="px-3 py-3">
-                            <div>${escapeHtml(generatorLabel)}</div>
+                            <div>${renderBillingGeneratorHtml(generatorLabel, line.inventory_type)}</div>
                             ${unknownHint}
                         </td>
                         <td class="px-3 py-3 text-right">${escapeHtml(priceLabel)}</td>

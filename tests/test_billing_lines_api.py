@@ -5,6 +5,7 @@ import sys
 import pytest
 from fastapi import HTTPException
 
+from config import GEN_INVENTORY_EMERGENCY
 from core.database import DatabaseManager
 from core.models import Booking, BookingItem, Generator, Vendor
 from core.repositories import BookingRepository, GeneratorRepository, VendorRepository
@@ -46,7 +47,13 @@ def seed_billing_data(conn) -> None:
     vendor_repo.save(Vendor(vendor_id="VEN002", vendor_name="Beta Vendor"))
 
     generator_repo.save(Generator(generator_id="GEN-45", capacity_kva=45))
-    generator_repo.save(Generator(generator_id="GEN-65", capacity_kva=65))
+    generator_repo.save(
+        Generator(
+            generator_id="GEN-65",
+            capacity_kva=65,
+            inventory_type=GEN_INVENTORY_EMERGENCY,
+        )
+    )
 
     booking_repo.save(
         Booking(
@@ -189,14 +196,15 @@ def test_billing_lines_filters_confirmed_only_and_range_inclusive(app_module_and
             row["booked_date"],
             row["generator_id"],
             row["capacity_kva"],
+            row["inventory_type"],
         )
         for row in payload["rows"]
     ]
     assert ordered_rows == [
-        ("VEN001", "Alpha Vendor", "BKG-20260210-00001", "2026-02-21", "GEN-45", 45),
-        ("VEN001", "Alpha Vendor", "BKG-20260210-00001", "2026-02-22", "GEN-65", 65),
-        ("VEN001", "Alpha Vendor", "BKG-20260210-00001", "2026-02-22", "GEN-MISSING", None),
-        ("VEN002", "Beta Vendor", "BKG-20260210-00002", "2026-02-20", "GEN-65", 65),
+        ("VEN001", "Alpha Vendor", "BKG-20260210-00001", "2026-02-21", "GEN-45", 45, "retailer"),
+        ("VEN001", "Alpha Vendor", "BKG-20260210-00001", "2026-02-22", "GEN-65", 65, GEN_INVENTORY_EMERGENCY),
+        ("VEN001", "Alpha Vendor", "BKG-20260210-00001", "2026-02-22", "GEN-MISSING", None, "retailer"),
+        ("VEN002", "Beta Vendor", "BKG-20260210-00002", "2026-02-20", "GEN-65", 65, GEN_INVENTORY_EMERGENCY),
     ]
 
 

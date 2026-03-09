@@ -92,7 +92,7 @@
                         <option value="">-- Select Generator --</option>
                         {% for gen in generators %}
                         <option value="{{ gen.generator_id }}">
-                            {{ gen.generator_id }} - {{ gen.capacity_kva }} kVA
+                            {{ gen.generator_id }} - {{ gen.capacity_kva }} kVA{% if gen.inventory_type == 'emergency' %} • Emergency Genset{% endif %}
                         </option>
                         {% endfor %}
                     </select>
@@ -196,6 +196,55 @@
     </div>
 </div>
 
+<div id="retailerOutOfStockOverlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 p-4">
+    <div class="w-full max-w-5xl rounded-2xl bg-white shadow-xl">
+        <div class="flex items-center justify-between border-b border-rose-200 px-6 py-4">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-rose-500">Retailer Out Of Stock</div>
+                <div class="mt-1 text-lg font-semibold text-slate-900">Emergency Genset Suggestions</div>
+                <div id="retailerOutOfStockMessage" class="mt-1 text-xs text-slate-500">
+                    Retailer stock is unavailable for one or more selected dates.
+                </div>
+            </div>
+            <button id="closeRetailerOutOfStockOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                Close
+            </button>
+        </div>
+        <div class="space-y-4 px-6 py-5">
+            <div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-800">
+                Retailer gensets cannot be assigned for the date(s) below. You can continue with the suggested emergency genset(s) or cancel and choose different dates.
+            </div>
+            <div class="overflow-hidden rounded-2xl border border-slate-200">
+                <div class="max-h-[55vh] overflow-auto">
+                    <table class="min-w-full text-sm">
+                        <thead class="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                            <tr>
+                                <th class="px-4 py-3 text-left font-semibold">Booked Date</th>
+                                <th class="px-4 py-3 text-left font-semibold">Requested Capacity</th>
+                                <th class="px-4 py-3 text-left font-semibold">Suggested Emergency Genset</th>
+                                <th class="px-4 py-3 text-left font-semibold">Available Emergency Alternatives</th>
+                            </tr>
+                        </thead>
+                        <tbody id="retailerOutOfStockTableBody" class="divide-y divide-slate-100 text-slate-700">
+                            <tr>
+                                <td colspan="4" class="px-4 py-6 text-center text-sm text-slate-500">No emergency suggestions available.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 px-6 py-4">
+            <button id="cancelRetailerOutOfStockOverlay" type="button" class="rounded-full border border-slate-200 px-5 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                Cancel
+            </button>
+            <button id="confirmRetailerOutOfStockOverlay" type="button" class="rounded-full bg-rose-600 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2">
+                Use Emergency Genset(s)
+            </button>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -228,10 +277,17 @@ document.addEventListener('DOMContentLoaded', function() {
     const vendorRowsOverlaySubtitle = document.getElementById('vendorRowsOverlaySubtitle');
     const vendorRowsOverlayContent = document.getElementById('vendorRowsOverlayContent');
     const closeVendorRowsOverlay = document.getElementById('closeVendorRowsOverlay');
+    const retailerOutOfStockOverlay = document.getElementById('retailerOutOfStockOverlay');
+    const retailerOutOfStockMessage = document.getElementById('retailerOutOfStockMessage');
+    const retailerOutOfStockTableBody = document.getElementById('retailerOutOfStockTableBody');
+    const closeRetailerOutOfStockOverlay = document.getElementById('closeRetailerOutOfStockOverlay');
+    const cancelRetailerOutOfStockOverlay = document.getElementById('cancelRetailerOutOfStockOverlay');
+    const confirmRetailerOutOfStockOverlay = document.getElementById('confirmRetailerOutOfStockOverlay');
 
     let bookingsAbortController = null;
     let lastResolvedVendorId = '';
     let currentVendorBookingsView = null;
+    let pendingEmergencyFallback = null;
 
     function escapeHtml(value) {
         return String(value ?? '')
@@ -247,6 +303,25 @@ document.addEventListener('DOMContentLoaded', function() {
         if (status === 'Pending') return 'bg-amber-100 text-amber-700';
         if (status === 'Cancelled') return 'bg-rose-100 text-rose-700';
         return 'bg-slate-100 text-slate-700';
+    }
+
+    function isEmergencyInventory(inventoryType) {
+        return String(inventoryType ?? '').trim().toLowerCase() === 'emergency';
+    }
+
+    function renderGeneratorLabelHtml(label, inventoryType) {
+        const safeLabel = escapeHtml(label || '-');
+        if (isEmergencyInventory(inventoryType)) {
+            return `<span data-generator-inventory="emergency" class="font-semibold text-rose-700">${safeLabel}</span>`;
+        }
+        return `<span data-generator-inventory="retailer" class="font-semibold text-slate-900">${safeLabel}</span>`;
+    }
+
+    function formatGeneratorLabel(generatorId, capacityKva) {
+        if (capacityKva == null || capacityKva === '') {
+            return generatorId || '-';
+        }
+        return `${generatorId || '-'} (${capacityKva} kVA)`;
     }
 
     function setCapacityButtonState(button, selected) {
@@ -353,11 +428,72 @@ document.addEventListener('DOMContentLoaded', function() {
         vendorRowsOverlay.classList.add('flex');
     }
 
+    function hideRetailerOutOfStockOverlay() {
+        if (!retailerOutOfStockOverlay) return;
+        retailerOutOfStockOverlay.classList.add('hidden');
+        retailerOutOfStockOverlay.classList.remove('flex');
+    }
+
+    function showRetailerOutOfStockOverlay() {
+        if (!retailerOutOfStockOverlay) return;
+        retailerOutOfStockOverlay.classList.remove('hidden');
+        retailerOutOfStockOverlay.classList.add('flex');
+    }
+
+    function renderEmergencyOptionHtml(option) {
+        const notes = (option.notes || '').trim();
+        const type = (option.type || '').trim();
+        const identification = (option.identification || '').trim();
+        const metaParts = [identification, type].filter(Boolean);
+        const metaText = metaParts.length ? metaParts.join(' | ') : 'Warehouse backup';
+        return `
+            <div class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+                <div>${renderGeneratorLabelHtml(formatGeneratorLabel(option.generator_id, option.capacity_kva), option.inventory_type)}</div>
+                <div class="mt-1 text-xs text-rose-700">${escapeHtml(metaText)}</div>
+                ${notes ? `<div class="mt-1 text-[11px] text-rose-600">${escapeHtml(notes)}</div>` : ''}
+            </div>
+        `;
+    }
+
+    function renderRetailerOutOfStockDetails(payload) {
+        if (!retailerOutOfStockTableBody) return;
+        const affectedDates = payload?.affected_dates || [];
+        retailerOutOfStockMessage.textContent = payload?.message || 'Retailer stock is unavailable for one or more selected dates.';
+
+        if (!affectedDates.length) {
+            retailerOutOfStockTableBody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="px-4 py-6 text-center text-sm text-slate-500">No emergency suggestions available.</td>
+                </tr>
+            `;
+            return;
+        }
+
+        retailerOutOfStockTableBody.innerHTML = affectedDates.map((entry) => {
+            const suggestedOption = (entry.emergency_options || []).find(
+                (option) => option.generator_id === entry.suggested_generator_id
+            ) || (entry.emergency_options || [])[0];
+            const alternatives = (entry.emergency_options || []).map(renderEmergencyOptionHtml).join('');
+            return `
+                <tr class="align-top">
+                    <td class="px-4 py-4 font-semibold text-slate-900">${escapeHtml(entry.date || '-')}</td>
+                    <td class="px-4 py-4">${escapeHtml(entry.capacity_kva == null ? '-' : `${entry.capacity_kva} kVA`)}</td>
+                    <td class="px-4 py-4">
+                        ${suggestedOption ? renderEmergencyOptionHtml(suggestedOption) : '<span class="text-sm text-slate-500">No suggestion</span>'}
+                    </td>
+                    <td class="px-4 py-4">
+                        <div class="grid gap-2 sm:grid-cols-2">${alternatives || '<span class="text-sm text-slate-500">No alternatives</span>'}</div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
     function renderVendorRowsTable(rows) {
         const tableRows = rows.map((row) => `
             <tr class="border-b border-slate-100 last:border-b-0">
                 <td class="px-3 py-2 font-semibold text-slate-900">${escapeHtml(row.booking_id)}</td>
-                <td class="px-3 py-2">${escapeHtml(row.generator_id)}</td>
+                <td class="px-3 py-2">${renderGeneratorLabelHtml(row.generator_id, row.inventory_type)}</td>
                 <td class="px-3 py-2">${escapeHtml(row.capacity)}</td>
                 <td class="px-3 py-2">${escapeHtml(row.booking_date)}</td>
                 <td class="px-3 py-2">
@@ -472,6 +608,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     booking_id: booking.booking_id || '-',
                     generator_id: item.generator_id || '-',
                     capacity: item.capacity_kva == null ? '-' : `${item.capacity_kva} kVA`,
+                    inventory_type: item.inventory_type || '',
                     booking_date: dateStr,
                     status: bookingStatus,
                 });
@@ -652,7 +789,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 const dateOnly = item.start_dt ? item.start_dt.split(' ')[0] : '';
                 const row = document.createElement('div');
                 row.className = 'rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700';
-                row.textContent = `${item.generator_id}${dateOnly ? ` | ${dateOnly}` : ''}${item.remarks ? ` | ${item.remarks}` : ''}`;
+                const remarksLabel = item.remarks ? ` | ${escapeHtml(item.remarks)}` : '';
+                row.innerHTML = `
+                    <div class="flex flex-wrap items-center gap-2">
+                        ${renderGeneratorLabelHtml(formatGeneratorLabel(item.generator_id, item.capacity_kva), item.inventory_type)}
+                        ${dateOnly ? `<span class="text-slate-500">| ${escapeHtml(dateOnly)}</span>` : ''}
+                        ${remarksLabel ? `<span class="text-slate-500">${remarksLabel}</span>` : ''}
+                    </div>
+                `;
                 list.appendChild(row);
             });
             overlayBookingContent.appendChild(list);
@@ -764,130 +908,197 @@ document.addEventListener('DOMContentLoaded', function() {
         updateSelectedDates(picker.selectedDates);
     }
 
+    async function fetchBookingDetail(bookingId) {
+        try {
+            const detailResponse = await fetch(`/api/bookings/${encodeURIComponent(bookingId)}`);
+            if (detailResponse.status === 401) {
+                window.location.href = '/login';
+                return null;
+            }
+            if (!detailResponse.ok) {
+                return null;
+            }
+            return await detailResponse.json();
+        } catch (detailError) {
+            console.warn('Unable to load booking detail', detailError);
+            return null;
+        }
+    }
+
+    function buildBookingPayloadFromForm() {
+        syncVendorId();
+
+        const vendorId = document.getElementById('vendor_id').value;
+        const vendorError = document.getElementById('vendor-error');
+        const vendorErrorText = document.getElementById('vendor-error-text');
+        if (!vendorId) {
+            vendorErrorText.textContent = 'Please select a valid vendor from the list';
+            vendorError.classList.remove('hidden');
+            document.getElementById('vendor_search').focus();
+            return null;
+        }
+        vendorError.classList.add('hidden');
+
+        const selectedDates = picker ? picker.selectedDates : [];
+        const dates = selectedDates.map(date => picker.formatDate(date, 'Y-m-d'));
+        const datesError = document.getElementById('dates-error');
+        const datesErrorText = document.getElementById('dates-error-text');
+        if (dates.length === 0) {
+            datesErrorText.textContent = 'Please select at least one date';
+            datesError.classList.remove('hidden');
+            document.getElementById('bookingDates').focus();
+            return null;
+        }
+        datesError.classList.add('hidden');
+
+        const assignMethod = document.querySelector('input[name="assign_method"]:checked').value;
+        const remarks = document.getElementById('remarks').value;
+        const assignmentError = document.getElementById('assignment-error');
+        const assignmentErrorText = document.getElementById('assignment-error-text');
+        let generatorId = null;
+        let capacityKva = null;
+
+        if (assignMethod === 'generator') {
+            generatorId = document.getElementById('generator_id').value;
+            if (!generatorId) {
+                assignmentErrorText.textContent = 'Please select a generator';
+                assignmentError.classList.remove('hidden');
+                document.getElementById('generator_id').focus();
+                return null;
+            }
+        } else {
+            capacityKva = document.getElementById('capacity_kva').value;
+            if (!capacityKva) {
+                assignmentErrorText.textContent = 'Please select a capacity';
+                assignmentError.classList.remove('hidden');
+                return null;
+            }
+        }
+        assignmentError.classList.add('hidden');
+
+        const items = dates.map((date) => {
+            const item = {
+                date: date,
+                remarks: remarks,
+            };
+            if (generatorId) {
+                item.generator_id = generatorId;
+            } else {
+                item.capacity_kva = parseInt(capacityKva, 10);
+            }
+            return item;
+        });
+
+        return {
+            vendorId,
+            dates,
+            payload: {
+                vendor_id: vendorId,
+                items: items,
+            },
+        };
+    }
+
+    async function handleBookingSuccess(data, requestContext) {
+        const detail = await fetchBookingDetail(data.booking_id);
+        const vendorName = getVendorNameById(requestContext.vendorId);
+        const detailItems = detail && detail.items ? detail.items : [];
+        const derivedDates = detailItems.length
+            ? Array.from(new Set(detailItems.map(item => item.start_dt.split(' ')[0]))).sort()
+            : requestContext.dates;
+
+        showBookingOverlay({
+            bookingId: data.booking_id,
+            message: data.message || 'Booking saved successfully.',
+            vendorName: vendorName,
+            dateCount: derivedDates.length,
+            itemCount: detailItems.length || requestContext.dates.length,
+            dates: derivedDates,
+            items: detailItems,
+        });
+    }
+
+    function buildEmergencyFallbackPayload(originalPayload, fallbackPayload) {
+        const fallbackMap = new Map();
+        (fallbackPayload?.affected_dates || []).forEach((entry) => {
+            const compositeKey = `${entry.date || ''}__${entry.capacity_kva ?? ''}`;
+            fallbackMap.set(compositeKey, entry.suggested_generator_id);
+            if (!fallbackMap.has(entry.date || '')) {
+                fallbackMap.set(entry.date || '', entry.suggested_generator_id);
+            }
+        });
+
+        return {
+            vendor_id: originalPayload.vendor_id,
+            items: (originalPayload.items || []).map((item) => {
+                const compositeKey = `${item.date || ''}__${item.capacity_kva ?? ''}`;
+                const suggestedGeneratorId = fallbackMap.get(compositeKey) || fallbackMap.get(item.date || '');
+                if (!suggestedGeneratorId) {
+                    return { ...item };
+                }
+                return {
+                    date: item.date,
+                    remarks: item.remarks || '',
+                    generator_id: suggestedGeneratorId,
+                };
+            }),
+        };
+    }
+
+    async function submitBookingRequest(requestContext, { allowFallbackPrompt = true } = {}) {
+        const response = await fetch('/api/bookings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestContext.payload)
+        });
+
+        let data = {};
+        try {
+            data = await response.json();
+        } catch (_error) {
+            data = {};
+        }
+
+        if (response.ok) {
+            pendingEmergencyFallback = null;
+            hideRetailerOutOfStockOverlay();
+            await handleBookingSuccess(data, requestContext);
+            return;
+        }
+
+        if (response.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+
+        if (allowFallbackPrompt && response.status === 409 && data.error_code === 'retailer_out_of_stock') {
+            pendingEmergencyFallback = {
+                originalRequest: requestContext,
+                fallbackPayload: data,
+            };
+            renderRetailerOutOfStockDetails(data);
+            showRetailerOutOfStockOverlay();
+            return;
+        }
+
+        const errorMsg = data.detail || data.message || 'Unknown error occurred';
+        alert('❌ Error creating booking:\n\n' + errorMsg);
+        console.error('Booking error:', data);
+    }
+
     const bookingForm = document.getElementById('bookingForm');
     if (bookingForm) {
         bookingForm.addEventListener('submit', async function(e) {
             e.preventDefault();
 
             try {
-                syncVendorId();
-                const vendorId = document.getElementById('vendor_id').value;
-                const vendorError = document.getElementById('vendor-error');
-                const vendorErrorText = document.getElementById('vendor-error-text');
-
-                // Validate vendor
-                if (!vendorId) {
-                    vendorErrorText.textContent = 'Please select a valid vendor from the list';
-                    vendorError.classList.remove('hidden');
-                    document.getElementById('vendor_search').focus();
+                const requestContext = buildBookingPayloadFromForm();
+                if (!requestContext) {
                     return;
-                } else {
-                    vendorError.classList.add('hidden');
                 }
-
-                const assignMethod = document.querySelector('input[name="assign_method"]:checked').value;
-                const remarks = document.getElementById('remarks').value;
-
-                const selectedDates = picker ? picker.selectedDates : [];
-                const dates = selectedDates.map(date => picker.formatDate(date, 'Y-m-d'));
-
-                // Validate dates
-                const datesError = document.getElementById('dates-error');
-                const datesErrorText = document.getElementById('dates-error-text');
-                if (dates.length === 0) {
-                    datesErrorText.textContent = 'Please select at least one date';
-                    datesError.classList.remove('hidden');
-                    document.getElementById('bookingDates').focus();
-                    return;
-                } else {
-                    datesError.classList.add('hidden');
-                }
-
-                let generatorId = null;
-                let capacityKva = null;
-
-                // Validate generator or capacity selection
-                const assignmentError = document.getElementById('assignment-error');
-                const assignmentErrorText = document.getElementById('assignment-error-text');
-                if (assignMethod === 'generator') {
-                    generatorId = document.getElementById('generator_id').value;
-                    if (!generatorId) {
-                        assignmentErrorText.textContent = 'Please select a generator';
-                        assignmentError.classList.remove('hidden');
-                        document.getElementById('generator_id').focus();
-                        return;
-                    }
-                } else {
-                    capacityKva = document.getElementById('capacity_kva').value;
-                    if (!capacityKva) {
-                        assignmentErrorText.textContent = 'Please select a capacity';
-                        assignmentError.classList.remove('hidden');
-                        return;
-                    }
-                }
-                assignmentError.classList.add('hidden');
-
-                const items = dates.map(date => {
-                    const item = {
-                        date: date,
-                        remarks: remarks
-                    };
-
-                    if (generatorId) {
-                        item.generator_id = generatorId;
-                    } else {
-                        item.capacity_kva = parseInt(capacityKva);
-                    }
-
-                    return item;
-                });
-
-                const response = await fetch('/api/bookings', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        vendor_id: vendorId,
-                        items: items
-                    })
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    let detail = null;
-                    try {
-                        const detailResponse = await fetch(`/api/bookings/${data.booking_id}`);
-                        if (detailResponse.ok) {
-                            detail = await detailResponse.json();
-                        }
-                    } catch (detailError) {
-                        console.warn('Unable to load booking detail', detailError);
-                    }
-
-                    const vendorName = getVendorNameById(vendorId);
-                    const detailItems = detail && detail.items ? detail.items : [];
-                    const derivedDates = detailItems.length
-                        ? Array.from(new Set(detailItems.map(item => item.start_dt.split(' ')[0]))).sort()
-                        : dates;
-
-                    showBookingOverlay({
-                        bookingId: data.booking_id,
-                        message: data.message || 'Booking saved successfully.',
-                        vendorName: vendorName,
-                        dateCount: derivedDates.length,
-                        itemCount: detailItems.length || dates.length,
-                        dates: derivedDates,
-                        items: detailItems
-                    });
-                } else if (response.status === 401) {
-                    window.location.href = '/login';
-                } else {
-                    const errorMsg = data.detail || 'Unknown error occurred';
-                    alert('❌ Error creating booking:\n\n' + errorMsg);
-                    console.error('Booking error:', data);
-                }
+                await submitBookingRequest(requestContext);
             } catch (error) {
                 alert('❌ Error: ' + error.message);
                 console.error(error);
@@ -912,6 +1123,40 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     closeVendorRowsOverlay?.addEventListener('click', hideVendorRowsOverlay);
+    closeRetailerOutOfStockOverlay?.addEventListener('click', function() {
+        pendingEmergencyFallback = null;
+        hideRetailerOutOfStockOverlay();
+    });
+    cancelRetailerOutOfStockOverlay?.addEventListener('click', function() {
+        pendingEmergencyFallback = null;
+        hideRetailerOutOfStockOverlay();
+    });
+    confirmRetailerOutOfStockOverlay?.addEventListener('click', async function() {
+        if (!pendingEmergencyFallback) {
+            hideRetailerOutOfStockOverlay();
+            return;
+        }
+
+        const fallbackRequestPayload = buildEmergencyFallbackPayload(
+            pendingEmergencyFallback.originalRequest.payload,
+            pendingEmergencyFallback.fallbackPayload
+        );
+        hideRetailerOutOfStockOverlay();
+
+        try {
+            await submitBookingRequest(
+                {
+                    vendorId: pendingEmergencyFallback.originalRequest.vendorId,
+                    dates: pendingEmergencyFallback.originalRequest.dates,
+                    payload: fallbackRequestPayload,
+                },
+                { allowFallbackPrompt: false }
+            );
+        } catch (error) {
+            alert('❌ Error: ' + error.message);
+            console.error(error);
+        }
+    });
 
     vendorRowsOverlay?.addEventListener('click', function(event) {
         if (event.target === vendorRowsOverlay) {
@@ -919,9 +1164,20 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    retailerOutOfStockOverlay?.addEventListener('click', function(event) {
+        if (event.target === retailerOutOfStockOverlay) {
+            pendingEmergencyFallback = null;
+            hideRetailerOutOfStockOverlay();
+        }
+    });
+
     document.addEventListener('keydown', function(event) {
         if (event.key === 'Escape' && vendorRowsOverlay && !vendorRowsOverlay.classList.contains('hidden')) {
             hideVendorRowsOverlay();
+        }
+        if (event.key === 'Escape' && retailerOutOfStockOverlay && !retailerOutOfStockOverlay.classList.contains('hidden')) {
+            pendingEmergencyFallback = null;
+            hideRetailerOutOfStockOverlay();
         }
     });
 

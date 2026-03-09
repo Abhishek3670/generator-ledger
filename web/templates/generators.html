@@ -1,5 +1,115 @@
 {% extends "base.html" %}
 
+{% macro generator_section(section_id, title, description, generators, booking_status, selected_date, inventory_labels) %}
+{% set is_emergency = section_id == 'emergencyGenset' %}
+<section class="mt-8 rounded-3xl border bg-white p-5 shadow-sm lg:p-6 {% if is_emergency %}border-rose-200{% else %}border-slate-200{% endif %}" data-generator-section="{{ section_id }}">
+    <div class="flex flex-wrap items-center justify-between gap-4">
+        <div>
+            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inventory Group</div>
+            <h2 class="mt-2 text-xl font-semibold {% if is_emergency %}text-rose-700{% else %}text-slate-900{% endif %}">{{ title }}</h2>
+            <p class="mt-1 text-sm text-slate-500">{{ description }}</p>
+        </div>
+        <div class="rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] {% if is_emergency %}border-rose-200 bg-rose-50 text-rose-700{% else %}border-slate-200 bg-slate-50 text-slate-500{% endif %}">
+            {{ generators|length }} record{{ '' if generators|length == 1 else 's' }}
+        </div>
+    </div>
+
+    {% if generators %}
+    <div class="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+        <label for="{{ section_id }}Filter" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Search</label>
+        <input
+            type="text"
+            id="{{ section_id }}Filter"
+            data-table-body="{{ section_id }}Table"
+            class="generator-filter-input mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+            placeholder="Search by ID, Type, Status, or Booking"
+        >
+    </div>
+
+    <div class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div class="generator-table-scroll">
+            <table class="min-w-full text-sm">
+                <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                        <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">Generator ID</th>
+                        <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">
+                            <button type="button" class="inline-flex items-center gap-2" data-sort="capacity" data-sort-section="{{ section_id }}">
+                                <span>Capacity (kVA)</span>
+                                <span class="text-xs text-slate-400" data-sort-indicator="capacity" data-sort-section="{{ section_id }}"></span>
+                            </button>
+                        </th>
+                        <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">Type</th>
+                        <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">Identification</th>
+                        <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">Operational Status</th>
+                        <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">
+                            <button type="button" class="inline-flex items-center gap-2" data-sort="booking" data-sort-section="{{ section_id }}">
+                                <span>Booking Status</span>
+                                <span class="text-xs text-slate-400" data-sort-indicator="booking" data-sort-section="{{ section_id }}"></span>
+                            </button>
+                        </th>
+                        <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">Notes</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 text-slate-700" id="{{ section_id }}Table">
+                    {% for gen in generators %}
+                    <tr
+                        class="cursor-pointer transition hover:bg-slate-50"
+                        data-generator-id="{{ gen.generator_id }}"
+                        data-capacity="{{ gen.capacity_kva }}"
+                        data-type="{{ gen.type or '' }}"
+                        data-identification="{{ gen.identification or '' }}"
+                        data-booking="{{ booking_status.get(gen.generator_id, '') if selected_date else '' }}"
+                        data-inventory-type="{{ gen.inventory_type }}"
+                    >
+                        <td class="px-6 py-4 font-semibold text-slate-900">{{ gen.generator_id }}</td>
+                        <td class="px-6 py-4">{{ gen.capacity_kva }}</td>
+                        <td class="px-6 py-4">{{ gen.type or '-' }}</td>
+                        <td class="px-6 py-4">{{ gen.identification or '-' }}</td>
+                        <td class="px-6 py-4">
+                            {% set op_status = 'Active' if gen.status == 'Active' else 'Inactive' %}
+                            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold {% if op_status == 'Active' %}bg-emerald-100 text-emerald-700{% else %}bg-rose-100 text-rose-700{% endif %}">
+                                {{ op_status }}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4">
+                            {% if selected_date %}
+                                {% set booking_label = booking_status.get(gen.generator_id, 'Free') %}
+                                <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold {% if booking_label == 'Booked' %}bg-amber-100 text-amber-700{% else %}bg-emerald-100 text-emerald-700{% endif %}">
+                                    {{ booking_label }}
+                                </span>
+                            {% else %}
+                                <span class="text-xs text-slate-400">&mdash;</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4">{{ gen.notes or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <div class="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-600">
+        No {{ title|lower }} records available yet.
+    </div>
+    {% endif %}
+</section>
+{% endmacro %}
+
+{% block head %}
+<style>
+.generator-table-scroll {
+    max-height: clamp(18rem, 46vh, 32rem);
+    overflow: auto;
+}
+@media (max-width: 768px) {
+    .generator-table-scroll {
+        max-height: clamp(16rem, 42vh, 26rem);
+    }
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100">
     <div class="mx-auto max-w-6xl px-4 py-10 lg:py-12" style="font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;">
@@ -7,27 +117,17 @@
             <div>
                 <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inventory</div>
                 <h1 class="mt-2 text-2xl font-semibold text-slate-900">Generators</h1>
-                <p class="mt-1 text-sm text-slate-500">Track capacity, availability, and identifiers.</p>
+                <p class="mt-1 text-sm text-slate-500">Track retailer and emergency genset inventory, capacity, availability, and identifiers.</p>
             </div>
             {% if permissions.get('generator_management') %}
             <button id="openAddGenerator" type="button" class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">
-                + Add New Generator
+                + Add New Genset
             </button>
             {% endif %}
         </div>
 
-        {% if generators %}
         <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div class="flex flex-wrap items-end gap-4">
-                <div class="flex-1 min-w-[220px]">
-                    <label for="generatorFilter" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Search</label>
-                    <input
-                        type="text"
-                        id="generatorFilter"
-                        placeholder="Search by ID, Type, Status, or Booking"
-                        class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
-                    >
-                </div>
                 <div>
                     <label for="bookingDateFilter" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Booked Date</label>
                     <input
@@ -41,72 +141,28 @@
                     All
                 </button>
             </div>
-            <p class="mt-3 text-xs text-slate-500">Booking status shows &mdash; until a date is selected.</p>
+            <p class="mt-3 text-xs text-slate-500">Booking status shows &mdash; until a date is selected. Retailer stock is preferred first; emergency stock stays available as warehouse backup.</p>
         </div>
 
-        <div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div class="overflow-x-auto">
-                <table class="min-w-full text-sm">
-                    <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                        <tr>
-                            <th class="px-6 py-4 text-left font-semibold">Generator ID</th>
-                            <th class="px-6 py-4 text-left font-semibold">
-                                <button type="button" class="inline-flex items-center gap-2" data-sort="capacity">
-                                    <span>Capacity (kVA)</span>
-                                    <span class="text-xs text-slate-400" data-sort-indicator="capacity"></span>
-                                </button>
-                            </th>
-                            <th class="px-6 py-4 text-left font-semibold">Type</th>
-                            <th class="px-6 py-4 text-left font-semibold">Identification</th>
-                            <th class="px-6 py-4 text-left font-semibold">Operational Status</th>
-                            <th class="px-6 py-4 text-left font-semibold">
-                                <button type="button" class="inline-flex items-center gap-2" data-sort="booking">
-                                    <span>Booking Status</span>
-                                    <span class="text-xs text-slate-400" data-sort-indicator="booking"></span>
-                                </button>
-                            </th>
-                            <th class="px-6 py-4 text-left font-semibold">Notes</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-100 text-slate-700" id="generatorTable">
-                        {% for gen in generators %}
-                        <tr class="transition hover:bg-slate-50 cursor-pointer" data-generator-id="{{ gen.generator_id }}" data-capacity="{{ gen.capacity_kva }}" data-type="{{ gen.type or '' }}" data-identification="{{ gen.identification or '' }}" data-booking="{{ booking_status.get(gen.generator_id, '') if selected_date else '' }}">
-                            <td class="px-6 py-4 font-semibold text-slate-900">{{ gen.generator_id }}</td>
-                            <td class="px-6 py-4">{{ gen.capacity_kva }}</td>
-                            <td class="px-6 py-4">{{ gen.type or '-' }}</td>
-                            <td class="px-6 py-4">{{ gen.identification or '-' }}</td>
-                            <td class="px-6 py-4">
-                                {% set op_status = 'Active' if gen.status == 'Active' else 'Inactive' %}
-                                <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold
-                                    {% if op_status == 'Active' %}bg-emerald-100 text-emerald-700
-                                    {% else %}bg-rose-100 text-rose-700{% endif %}">
-                                    {{ op_status }}
-                                </span>
-                            </td>
-                            <td class="px-6 py-4">
-                                {% if selected_date %}
-                                    {% set booking_label = booking_status.get(gen.generator_id, 'Free') %}
-                                    <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold
-                                        {% if booking_label == 'Booked' %}bg-amber-100 text-amber-700
-                                        {% else %}bg-emerald-100 text-emerald-700{% endif %}">
-                                        {{ booking_label }}
-                                    </span>
-                                {% else %}
-                                    <span class="text-xs text-slate-400">&mdash;</span>
-                                {% endif %}
-                            </td>
-                            <td class="px-6 py-4">{{ gen.notes or '-' }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {% else %}
-        <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
-            No generators loaded. Please check the data files in the Data/ folder.
-        </div>
-        {% endif %}
+        {{ generator_section(
+            "retailerGenset",
+            "Retailer Genset",
+            "Gensets used for normal bookings and day-to-day retailer assignments.",
+            retailer_generators or [],
+            booking_status,
+            selected_date,
+            inventory_labels
+        ) }}
+
+        {{ generator_section(
+            "emergencyGenset",
+            "Emergency Genset",
+            "Backup gensets kept ready when any genset fails or retailer's request",
+            emergency_generators or [],
+            booking_status,
+            selected_date,
+            inventory_labels
+        ) }}
     </div>
 </div>
 
@@ -116,7 +172,7 @@
         <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
             <div>
                 <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inventory</div>
-                <div class="mt-1 text-lg font-semibold text-slate-900">Add New Generator</div>
+                <div class="mt-1 text-lg font-semibold text-slate-900">Add New Genset</div>
             </div>
             <button id="closeGeneratorOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
                 Close
@@ -124,6 +180,13 @@
         </div>
         <form id="generatorForm" class="space-y-4 px-6 py-5">
             <div class="grid gap-4 sm:grid-cols-2">
+                <div>
+                    <label for="genInventoryType" class="text-sm font-semibold text-slate-700">Inventory Group <span class="text-rose-500">*</span></label>
+                    <select id="genInventoryType" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                        <option value="retailer">Retailer Genset</option>
+                        <option value="emergency">Emergency Genset</option>
+                    </select>
+                </div>
                 <div>
                     <div class="text-sm font-semibold text-slate-700">Capacity (kVA) <span class="text-rose-500">*</span></div>
                     <div id="generatorCapacityButtons" class="mt-3 flex flex-wrap gap-3">
@@ -135,16 +198,18 @@
                     </div>
                     <input type="hidden" id="genCapacity" value="">
                 </div>
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2">
                 <div>
                     <label for="genType" class="text-sm font-semibold text-slate-700">Type <span class="text-rose-500">*</span></label>
                     <input id="genType" type="text" required class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
                 </div>
-            </div>
-            <div class="grid gap-4 sm:grid-cols-2">
                 <div>
                     <label for="genIdentification" class="text-sm font-semibold text-slate-700">Identification (Optional)</label>
                     <input id="genIdentification" type="text" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
                 </div>
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2">
                 <div>
                     <label for="genStatusDisplay" class="text-sm font-semibold text-slate-700">Operational Status</label>
                     <div class="relative">
@@ -169,14 +234,14 @@
                     </div>
                     <input type="hidden" id="genStatus" value="Active">
                 </div>
-            </div>
-            <div>
-                <label for="genNotes" class="text-sm font-semibold text-slate-700">Notes (Optional)</label>
-                <input id="genNotes" type="text" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                <div>
+                    <label for="genNotes" class="text-sm font-semibold text-slate-700">Notes (Optional)</label>
+                    <input id="genNotes" type="text" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                </div>
             </div>
             <div class="flex flex-wrap justify-end gap-3 pt-2">
                 <button type="button" id="cancelGeneratorForm" class="rounded-full border border-slate-200 px-5 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">Cancel</button>
-                <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800">Save Generator</button>
+                <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800">Save Genset</button>
             </div>
         </form>
     </div>
@@ -187,7 +252,7 @@
     <div class="w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white shadow-xl">
         <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
             <div>
-                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Generator</div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Genset</div>
                 <div id="detailGeneratorTitle" class="mt-1 text-lg font-semibold text-slate-900"></div>
                 <div id="detailGeneratorMeta" class="mt-1 text-xs text-slate-500"></div>
             </div>
@@ -221,10 +286,8 @@
                         <label for="generatorBookingRemarks" class="text-sm font-semibold text-slate-700">Remarks (Optional)</label>
                         <input id="generatorBookingRemarks" type="text" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
                     </div>
-                    <div class="flex justify-end gap-3 pt-2">
-                        <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800">
-                            Create Booking
-                        </button>
+                    <div class="flex justify-end pt-1">
+                        <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800">Create Booking</button>
                     </div>
                 </form>
                 {% else %}
@@ -236,16 +299,21 @@
 </div>
 
 <script>
-document.getElementById('generatorFilter')?.addEventListener('keyup', function() {
-    const filter = this.value.toUpperCase();
-    const tableBody = document.getElementById('generatorTable');
-    if (!tableBody) return;
-    const rows = tableBody.getElementsByTagName('tr');
+const inventoryLabels = {{ inventory_labels | tojson }};
 
-    for (let i = 0; i < rows.length; i++) {
-        const text = rows[i].textContent.toUpperCase();
-        rows[i].style.display = text.includes(filter) ? '' : 'none';
-    }
+document.querySelectorAll('.generator-filter-input').forEach(input => {
+    input.addEventListener('keyup', function() {
+        const filter = this.value.toUpperCase();
+        const tableBodyId = this.dataset.tableBody;
+        const tableBody = tableBodyId ? document.getElementById(tableBodyId) : null;
+        if (!tableBody) return;
+        const rows = tableBody.getElementsByTagName('tr');
+
+        for (let i = 0; i < rows.length; i++) {
+            const text = rows[i].textContent.toUpperCase();
+            rows[i].style.display = text.includes(filter) ? '' : 'none';
+        }
+    });
 });
 
 const bookingDateFilter = document.getElementById('bookingDateFilter');
@@ -290,11 +358,6 @@ function showGeneratorOverlay() {
     if (!generatorOverlay) return;
     generatorOverlay.classList.remove('hidden');
     generatorOverlay.classList.add('flex');
-}
-
-function showStatusDropdown() {
-    if (!statusDropdown) return;
-    statusDropdown.classList.remove('hidden');
 }
 
 function hideStatusDropdown() {
@@ -352,8 +415,112 @@ capacityButtons.forEach(button => {
     });
 });
 
-const generatorTableBody = document.getElementById('generatorTable');
-const bookingDateFilterValue = () => document.getElementById('bookingDateFilter')?.value || '';
+function initSectionSorting(sectionId) {
+    const tableBody = document.getElementById(`${sectionId}Table`);
+    if (!tableBody) return;
+
+    const sortState = {
+        capacity: 'none',
+        booking: 'none'
+    };
+    const sortStorageKey = `gensetSortKey:${sectionId}`;
+    const sortStorageDir = `gensetSortDir:${sectionId}`;
+
+    function updateSortIndicators() {
+        document.querySelectorAll(`[data-sort-section="${sectionId}"][data-sort-indicator]`).forEach(indicator => {
+            const key = indicator.dataset.sortIndicator;
+            const state = sortState[key];
+            if (state === 'asc') {
+                indicator.innerHTML = '&uarr;';
+            } else if (state === 'desc') {
+                indicator.innerHTML = '&darr;';
+            } else {
+                indicator.innerHTML = '&uarr;';
+            }
+        });
+    }
+
+    function sortRows(key) {
+        const rows = Array.from(tableBody.querySelectorAll('tr'));
+        const bookingRank = (value, mode) => {
+            if (mode === 'booked-first') {
+                return value === 'Booked' ? 0 : value === 'Free' ? 1 : 2;
+            }
+            if (mode === 'free-first') {
+                return value === 'Free' ? 0 : value === 'Booked' ? 1 : 2;
+            }
+            return 2;
+        };
+
+        const sorted = rows.sort((a, b) => {
+            if (key === 'capacity') {
+                const aVal = parseInt(a.dataset.capacity || '0', 10);
+                const bVal = parseInt(b.dataset.capacity || '0', 10);
+                return sortState.capacity === 'asc' ? aVal - bVal : bVal - aVal;
+            }
+            if (key === 'booking') {
+                const aStatus = a.dataset.booking || '';
+                const bStatus = b.dataset.booking || '';
+                const mode = sortState.booking === 'asc' ? 'booked-first' : 'free-first';
+                const aRank = bookingRank(aStatus, mode);
+                const bRank = bookingRank(bStatus, mode);
+                if (aRank !== bRank) return aRank - bRank;
+                return (a.dataset.capacity || '').localeCompare(b.dataset.capacity || '');
+            }
+            return 0;
+        });
+
+        sorted.forEach(row => tableBody.appendChild(row));
+    }
+
+    document.querySelectorAll(`[data-sort-section="${sectionId}"][data-sort]`).forEach(button => {
+        button.addEventListener('click', function() {
+            const key = this.dataset.sort;
+            if (!key) return;
+
+            if (key === 'capacity') {
+                sortState.capacity = sortState.capacity === 'asc' ? 'desc' : 'asc';
+                sortState.booking = 'none';
+            }
+
+            if (key === 'booking') {
+                sortState.booking = sortState.booking === 'asc' ? 'desc' : 'asc';
+                sortState.capacity = 'none';
+            }
+
+            const direction = key === 'capacity' ? sortState.capacity : sortState.booking;
+            if (direction === 'none') {
+                localStorage.removeItem(sortStorageKey);
+                localStorage.removeItem(sortStorageDir);
+            } else {
+                localStorage.setItem(sortStorageKey, key);
+                localStorage.setItem(sortStorageDir, direction);
+            }
+
+            updateSortIndicators();
+            sortRows(key);
+        });
+    });
+
+    const storedKey = localStorage.getItem(sortStorageKey);
+    const storedDir = localStorage.getItem(sortStorageDir);
+    if (storedKey === 'capacity' && (storedDir === 'asc' || storedDir === 'desc')) {
+        sortState.capacity = storedDir;
+        sortState.booking = 'none';
+        updateSortIndicators();
+        sortRows('capacity');
+    } else if (storedKey === 'booking' && (storedDir === 'asc' || storedDir === 'desc')) {
+        sortState.booking = storedDir;
+        sortState.capacity = 'none';
+        updateSortIndicators();
+        sortRows('booking');
+    } else {
+        updateSortIndicators();
+    }
+}
+
+['retailerGenset', 'emergencyGenset'].forEach(initSectionSorting);
+
 const generatorDetailOverlay = document.getElementById('generatorDetailOverlay');
 const closeGeneratorDetail = document.getElementById('closeGeneratorDetail');
 const detailGeneratorTitle = document.getElementById('detailGeneratorTitle');
@@ -368,107 +535,6 @@ const generatorBookingRemarks = document.getElementById('generatorBookingRemarks
 
 let cachedVendors = null;
 let activeGeneratorId = null;
-
-const sortState = {
-    capacity: 'none',
-    booking: 'none'
-};
-const sortStorageKey = 'gensetSortKey';
-const sortStorageDir = 'gensetSortDir';
-
-function updateSortIndicators() {
-    document.querySelectorAll('[data-sort-indicator]').forEach(indicator => {
-        const key = indicator.dataset.sortIndicator;
-        const state = sortState[key];
-        if (state === 'asc') {
-            indicator.innerHTML = '&uarr;';
-        } else if (state === 'desc') {
-            indicator.innerHTML = '&darr;';
-        } else {
-            indicator.innerHTML = '&uarr;';
-        }
-    });
-}
-
-function sortRows(key) {
-    if (!generatorTableBody) return;
-    const rows = Array.from(generatorTableBody.querySelectorAll('tr'));
-    const bookingRank = (value, mode) => {
-        if (mode === 'booked-first') {
-            return value === 'Booked' ? 0 : value === 'Free' ? 1 : 2;
-        }
-        if (mode === 'free-first') {
-            return value === 'Free' ? 0 : value === 'Booked' ? 1 : 2;
-        }
-        return 2;
-    };
-
-    const sorted = rows.sort((a, b) => {
-        if (!key) return 0;
-        if (key === 'capacity') {
-            const aVal = parseInt(a.dataset.capacity || '0', 10);
-            const bVal = parseInt(b.dataset.capacity || '0', 10);
-            return sortState.capacity === 'asc' ? aVal - bVal : bVal - aVal;
-        }
-        if (key === 'booking') {
-            const aStatus = a.dataset.booking || '';
-            const bStatus = b.dataset.booking || '';
-            const mode = sortState.booking === 'asc' ? 'booked-first' : 'free-first';
-            const aRank = bookingRank(aStatus, mode);
-            const bRank = bookingRank(bStatus, mode);
-            if (aRank !== bRank) return aRank - bRank;
-            return (a.dataset.capacity || '').localeCompare(b.dataset.capacity || '');
-        }
-        return 0;
-    });
-
-    sorted.forEach(row => generatorTableBody.appendChild(row));
-}
-
-document.querySelectorAll('[data-sort]').forEach(button => {
-    button.addEventListener('click', function() {
-        const key = this.dataset.sort;
-        if (!key) return;
-
-        if (key === 'capacity') {
-            sortState.capacity = sortState.capacity === 'asc' ? 'desc' : 'asc';
-            sortState.booking = 'none';
-        }
-
-        if (key === 'booking') {
-            sortState.booking = sortState.booking === 'asc' ? 'desc' : 'asc';
-            sortState.capacity = 'none';
-        }
-
-        const direction = key === 'capacity' ? sortState.capacity : sortState.booking;
-        if (direction === 'none') {
-            localStorage.removeItem(sortStorageKey);
-            localStorage.removeItem(sortStorageDir);
-        } else {
-            localStorage.setItem(sortStorageKey, key);
-            localStorage.setItem(sortStorageDir, direction);
-        }
-
-        updateSortIndicators();
-        sortRows(key);
-    });
-});
-
-const storedKey = localStorage.getItem(sortStorageKey);
-const storedDir = localStorage.getItem(sortStorageDir);
-if (storedKey === 'capacity' && (storedDir === 'asc' || storedDir === 'desc')) {
-    sortState.capacity = storedDir;
-    sortState.booking = 'none';
-    updateSortIndicators();
-    sortRows('capacity');
-} else if (storedKey === 'booking' && (storedDir === 'asc' || storedDir === 'desc')) {
-    sortState.booking = storedDir;
-    sortState.capacity = 'none';
-    updateSortIndicators();
-    sortRows('booking');
-} else {
-    updateSortIndicators();
-}
 
 openGeneratorOverlay?.addEventListener('click', showGeneratorOverlay);
 closeGeneratorOverlay?.addEventListener('click', hideGeneratorOverlay);
@@ -614,13 +680,15 @@ async function handleRowClick(row) {
     const type = row.dataset.type || '';
     const identification = row.dataset.identification || '';
     const status = row.dataset.booking || '';
-    const selectedDate = bookingDateFilterValue();
+    const inventoryType = row.dataset.inventoryType || 'retailer';
+    const selectedDate = bookingDateFilter?.value || '';
 
     if (detailGeneratorTitle) {
         detailGeneratorTitle.textContent = generatorId;
     }
     if (detailGeneratorMeta) {
         const metaParts = [];
+        if (inventoryLabels[inventoryType]) metaParts.push(inventoryLabels[inventoryType]);
         if (capacity) metaParts.push(`${capacity} kVA`);
         if (type) metaParts.push(type);
         if (identification) metaParts.push(identification);
@@ -653,11 +721,9 @@ async function handleRowClick(row) {
     }
 }
 
-if (generatorTableBody) {
-    generatorTableBody.querySelectorAll('tr').forEach(row => {
-        row.addEventListener('click', () => handleRowClick(row));
-    });
-}
+document.querySelectorAll('tr[data-generator-id]').forEach(row => {
+    row.addEventListener('click', () => handleRowClick(row));
+});
 
 generatorForm?.addEventListener('submit', async function(event) {
     event.preventDefault();
@@ -667,6 +733,7 @@ generatorForm?.addEventListener('submit', async function(event) {
     const identification = document.getElementById('genIdentification')?.value || '';
     const notes = document.getElementById('genNotes')?.value || '';
     const status = document.getElementById('genStatus')?.value || 'Active';
+    const inventoryType = document.getElementById('genInventoryType')?.value || 'retailer';
 
     if (!capacity || !type) {
         alert('Capacity (kVA) and Type are required.');
@@ -684,7 +751,8 @@ generatorForm?.addEventListener('submit', async function(event) {
                 type: type,
                 identification: identification,
                 notes: notes,
-                status: status
+                status: status,
+                inventory_type: inventoryType
             })
         });
 

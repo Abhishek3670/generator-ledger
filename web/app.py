@@ -41,6 +41,7 @@ from core import (
     BookingRepository,
     BookingHistoryRepository,
     UserRepository,
+    normalize_generator_inventory_type,
 )
 from core.repositories import SessionRepository, RevokedTokenRepository
 from core.observability import (
@@ -57,6 +58,7 @@ from core.services import (
     archive_all_bookings,
     log_booking_history,
     encode_history_items,
+    RetailerOutOfStockError,
 )
 from core.auth import (
     hash_password,
@@ -114,11 +116,19 @@ from config import (
     STATUS_CANCELLED,
     GEN_STATUS_ACTIVE,
     GEN_STATUS_INACTIVE,
+    GEN_STATUS_MAINTENANCE,
+    GEN_INVENTORY_RETAILER,
+    GEN_INVENTORY_EMERGENCY,
     DATETIME_FORMAT,
 )
 setup_logging()
 
 logger = logging.getLogger(__name__)
+
+GENERATOR_INVENTORY_LABELS = {
+    GEN_INVENTORY_RETAILER: "Retailer Genset",
+    GEN_INVENTORY_EMERGENCY: "Emergency Genset",
+}
 
 # Pydantic models for request bodies
 class BookingItem(BaseModel):
@@ -263,6 +273,7 @@ class CreateGeneratorRequest(BaseModel):
     identification: str = Field(default="", max_length=200)
     notes: str = Field(default="", max_length=500)
     status: Optional[str] = Field(default=GEN_STATUS_ACTIVE, max_length=50)
+    inventory_type: str = Field(default=GEN_INVENTORY_RETAILER, max_length=50)
 
     @field_validator('type')
     @classmethod
@@ -293,6 +304,16 @@ class CreateGeneratorRequest(BaseModel):
         if v and v not in [GEN_STATUS_ACTIVE, GEN_STATUS_INACTIVE, GEN_STATUS_MAINTENANCE]:
             raise ValueError(f'Status must be one of: {GEN_STATUS_ACTIVE}, {GEN_STATUS_INACTIVE}, {GEN_STATUS_MAINTENANCE}')
         return v
+
+    @field_validator('inventory_type')
+    @classmethod
+    def validate_inventory_type(cls, v):
+        normalized = (v or "").strip().lower()
+        if normalized not in {GEN_INVENTORY_RETAILER, GEN_INVENTORY_EMERGENCY}:
+            raise ValueError(
+                f'Inventory type must be one of: {GEN_INVENTORY_RETAILER}, {GEN_INVENTORY_EMERGENCY}'
+            )
+        return normalized
 
 
 class LoginRequest(BaseModel):
@@ -480,6 +501,7 @@ def _build_booking_date_rows(
         for item in grouped[date_key]:
             generator_id = item.get("generator_id") or "Unknown"
             capacity_kva = item.get("capacity_kva")
+            inventory_type = normalize_generator_inventory_type(item.get("inventory_type"))
             if capacity_kva is not None:
                 label = f"{generator_id} ({capacity_kva} kVA)"
             else:
@@ -497,6 +519,8 @@ def _build_booking_date_rows(
                     "item_status": item_status,
                     "remarks": item.get("remarks", ""),
                     "start_dt": item.get("start_dt", ""),
+                    "inventory_type": inventory_type,
+                    "is_emergency": inventory_type == GEN_INVENTORY_EMERGENCY,
                 }
             )
 
@@ -1448,6 +1472,12 @@ async def generators_page(
     try:
         gen_repo = GeneratorRepository(conn)
         generators = gen_repo.get_all()
+        retailer_generators = [
+            gen for gen in generators if gen.inventory_type == GEN_INVENTORY_RETAILER
+        ]
+        emergency_generators = [
+            gen for gen in generators if gen.inventory_type == GEN_INVENTORY_EMERGENCY
+        ]
         capacities = sorted(set(g.capacity_kva for g in generators))
 
         selected_date = request.query_params.get("date")
@@ -1480,9 +1510,12 @@ async def generators_page(
         return templates.TemplateResponse("generators.html", template_context(
             request,
             generators=generators,
+            retailer_generators=retailer_generators,
+            emergency_generators=emergency_generators,
             booking_status=booking_status,
             selected_date=selected_date or "",
-            capacities=capacities
+            capacities=capacities,
+            inventory_labels=GENERATOR_INVENTORY_LABELS,
         ))
     except Exception as e:
         logger.error(f"Error loading generators page: {e}", exc_info=True)
@@ -1985,7 +2018,9 @@ async def booking_detail_page(
             gen = gen_repo.get_by_id(item.generator_id)
             items_with_gen.append({
                 "item": item,
-                "generator_name": f"{gen.generator_id} ({gen.capacity_kva} kVA)" if gen else "Unknown"
+                "generator_name": f"{gen.generator_id} ({gen.capacity_kva} kVA)" if gen else "Unknown",
+                "inventory_type": normalize_generator_inventory_type(gen.inventory_type if gen else None),
+                "is_emergency": bool(gen and normalize_generator_inventory_type(gen.inventory_type) == GEN_INVENTORY_EMERGENCY),
             })
         
         return templates.TemplateResponse("booking_detail.html", template_context(
@@ -2032,7 +2067,9 @@ async def edit_booking_page(
             gen = gen_repo.get_by_id(item.generator_id)
             items_with_gen.append({
                 "item": item,
-                "generator_name": f"{gen.generator_id} ({gen.capacity_kva} kVA)" if gen else "Unknown"
+                "generator_name": f"{gen.generator_id} ({gen.capacity_kva} kVA)" if gen else "Unknown",
+                "inventory_type": normalize_generator_inventory_type(gen.inventory_type if gen else None),
+                "is_emergency": bool(gen and normalize_generator_inventory_type(gen.inventory_type) == GEN_INVENTORY_EMERGENCY),
             })
         
         return templates.TemplateResponse("edit_booking.html", template_context(
@@ -2375,7 +2412,12 @@ async def api_generators(
                 "identification": g.identification,
                 "type": g.type,
                 "status": g.status,
-                "notes": g.notes
+                "notes": g.notes,
+                "inventory_type": g.inventory_type,
+                "inventory_label": GENERATOR_INVENTORY_LABELS.get(
+                    g.inventory_type,
+                    GENERATOR_INVENTORY_LABELS[GEN_INVENTORY_RETAILER],
+                ),
             }
             for g in generators
         ]
@@ -2441,8 +2483,14 @@ async def api_create_generator(
         identification_raw = (request_data.identification or "").strip()
         notes_raw = (request_data.notes or "").strip()
         status_raw = (request_data.status or GEN_STATUS_ACTIVE).strip()
+        inventory_type_raw = normalize_generator_inventory_type(request_data.inventory_type)
         if status_raw not in {GEN_STATUS_ACTIVE, GEN_STATUS_INACTIVE}:
             raise HTTPException(status_code=400, detail="Operational Status must be Active or Inactive")
+        if inventory_type_raw not in {GEN_INVENTORY_RETAILER, GEN_INVENTORY_EMERGENCY}:
+            raise HTTPException(
+                status_code=400,
+                detail="Inventory type must be retailer or emergency",
+            )
 
         def normalize_token(value: str) -> str:
             return re.sub(r"[^A-Za-z0-9]+", "", value.upper())
@@ -2479,13 +2527,15 @@ async def api_create_generator(
             identification=identification_raw,
             type=type_raw,
             status=status_raw,
-            notes=notes_raw
+            notes=notes_raw,
+            inventory_type=inventory_type_raw,
         )
         gen_repo.save(generator)
         logger.info(f"Generator created | context={{'generator_id': '{generator_id}'}}")
         return {
             "success": True,
             "generator_id": generator_id,
+            "inventory_type": inventory_type_raw,
             "message": f"Generator {generator_id} created successfully"
         }
     except HTTPException:
@@ -2622,6 +2672,8 @@ async def api_vendor_bookings(
                     "id": item_id,
                     "generator_id": generator_id,
                     "capacity_kva": capacity_kva,
+                    "inventory_type": normalize_generator_inventory_type(row.get("inventory_type")),
+                    "is_emergency": normalize_generator_inventory_type(row.get("inventory_type")) == GEN_INVENTORY_EMERGENCY,
                     "start_dt": start_dt,
                     "end_dt": end_dt,
                     "item_status": item_status,
@@ -3147,9 +3199,18 @@ async def api_create_booking(
             "is_merged": is_merged,
             "total_items": item_count
         }
+    except RetailerOutOfStockError as e:
+        logger.info(
+            "Retailer stock unavailable for booking request | context="
+            f"{{'vendor_id': '{request_data.vendor_id}', 'affected_dates': {len(e.affected_dates)}}}"
+        )
+        return JSONResponse(status_code=409, content=e.payload)
     except ValueError as e:
         logger.warning(f"Validation error creating booking: {e}")
-        raise HTTPException(status_code=400, detail="Invalid booking data provided")
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        logger.warning(f"Booking creation blocked: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error creating booking: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while creating the booking")
@@ -3169,7 +3230,7 @@ async def api_booking_detail(
         except ValueError as e:
             raise HTTPException(status_code=404, detail="Booking not found")
         
-        items = booking_repo.get_items(booking_id)
+        items = booking_repo.get_items_with_capacity(booking_id)
         
         return {
             "booking": {
@@ -3180,12 +3241,15 @@ async def api_booking_detail(
             },
             "items": [
                 {
-                    "id": item.id,
-                    "generator_id": item.generator_id,
-                    "start_dt": item.start_dt,
-                    "end_dt": item.end_dt,
-                    "status": item.item_status,
-                    "remarks": item.remarks
+                    "id": item["id"],
+                    "generator_id": item["generator_id"],
+                    "capacity_kva": item["capacity_kva"],
+                    "inventory_type": normalize_generator_inventory_type(item.get("inventory_type")),
+                    "is_emergency": normalize_generator_inventory_type(item.get("inventory_type")) == GEN_INVENTORY_EMERGENCY,
+                    "start_dt": item["start_dt"],
+                    "end_dt": item["end_dt"],
+                    "status": item["item_status"],
+                    "remarks": item["remarks"],
                 }
                 for item in items
             ]
