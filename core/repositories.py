@@ -109,6 +109,8 @@ class _VendorDirectoryRepository:
     TABLE_NAME = ""
     SEQ_TABLE_NAME = ""
     ID_PREFIX = ""
+    ID_COLUMN = "vendor_id"
+    ID_ATTR = "vendor_id"
     MODEL_CLS = Vendor
 
     def __init__(self, conn: sqlite3.Connection):
@@ -117,17 +119,19 @@ class _VendorDirectoryRepository:
 
     def _row_to_model(self, row: Any) -> Vendor | RentalVendor:
         return self.MODEL_CLS(
-            vendor_id=row[0],
-            vendor_name=row[1],
-            vendor_place=row[2] or "",
-            phone=row[3] or "",
+            **{
+                self.ID_ATTR: row[0],
+                "vendor_name": row[1],
+                "vendor_place": row[2] or "",
+                "phone": row[3] or "",
+            }
         )
 
-    def get_by_id(self, vendor_id: str) -> Optional[Vendor | RentalVendor]:
+    def get_by_id(self, directory_id: str) -> Optional[Vendor | RentalVendor]:
         cur = self.conn.cursor()
         cur.execute(
-            f"SELECT vendor_id, vendor_name, vendor_place, phone FROM {self.TABLE_NAME} WHERE vendor_id = ?",
-            (vendor_id,),
+            f"SELECT {self.ID_COLUMN}, vendor_name, vendor_place, phone FROM {self.TABLE_NAME} WHERE {self.ID_COLUMN} = ?",
+            (directory_id,),
         )
         row = cur.fetchone()
         if not row:
@@ -136,52 +140,58 @@ class _VendorDirectoryRepository:
         return self._row_to_model(row)
 
     def save(self, vendor: Vendor | RentalVendor) -> None:
+        entity_id = str(getattr(vendor, self.ID_ATTR))
         try:
             cur = self.conn.cursor()
             cur.execute(
                 f"""INSERT OR REPLACE INTO {self.TABLE_NAME}
-                (vendor_id, vendor_name, vendor_place, phone)
+                ({self.ID_COLUMN}, vendor_name, vendor_place, phone)
                 VALUES (?, ?, ?, ?)""",
-                (vendor.vendor_id, vendor.vendor_name, vendor.vendor_place, vendor.phone),
+                (
+                    entity_id,
+                    vendor.vendor_name,
+                    vendor.vendor_place,
+                    vendor.phone,
+                ),
             )
             self.conn.commit()
         except sqlite3.Error:
-            self.logger.error(f"Failed to save vendor | context={{'id': '{vendor.vendor_id}'}}", exc_info=True)
+            self.logger.error(f"Failed to save vendor | context={{'id': '{entity_id}'}}", exc_info=True)
             raise
 
     def get_all(self) -> List[Vendor | RentalVendor]:
         cur = self.conn.cursor()
         cur.execute(
-            f"SELECT vendor_id, vendor_name, vendor_place, phone FROM {self.TABLE_NAME} ORDER BY vendor_id"
+            f"SELECT {self.ID_COLUMN}, vendor_name, vendor_place, phone FROM {self.TABLE_NAME} ORDER BY {self.ID_COLUMN}"
         )
         return [self._row_to_model(row) for row in cur.fetchall()]
 
-    def delete(self, vendor_id: str, commit: bool = True) -> None:
+    def delete(self, directory_id: str, commit: bool = True) -> None:
         cur = self.conn.cursor()
-        cur.execute(f"DELETE FROM {self.TABLE_NAME} WHERE vendor_id = ?", (vendor_id,))
+        cur.execute(f"DELETE FROM {self.TABLE_NAME} WHERE {self.ID_COLUMN} = ?", (directory_id,))
         if commit:
             self.conn.commit()
 
     def find_duplicate_name(
         self,
         vendor_name: str,
-        exclude_vendor_id: Optional[str] = None
+        exclude_directory_id: Optional[str] = None
     ) -> Optional[str]:
         cur = self.conn.cursor()
-        if exclude_vendor_id:
+        if exclude_directory_id:
             cur.execute(
                 f"""
-                SELECT vendor_id
+                SELECT {self.ID_COLUMN}
                 FROM {self.TABLE_NAME}
                 WHERE LOWER(vendor_name) = LOWER(?)
-                  AND vendor_id <> ?
+                  AND {self.ID_COLUMN} <> ?
                 """,
-                (vendor_name, exclude_vendor_id),
+                (vendor_name, exclude_directory_id),
             )
         else:
             cur.execute(
                 f"""
-                SELECT vendor_id
+                SELECT {self.ID_COLUMN}
                 FROM {self.TABLE_NAME}
                 WHERE LOWER(vendor_name) = LOWER(?)
                 """,
@@ -208,8 +218,8 @@ class _VendorDirectoryRepository:
 
             prefix_length = len(self.ID_PREFIX)
             cur.execute(
-                f"SELECT MAX(CAST(SUBSTR(vendor_id, {prefix_length + 1}) AS INTEGER)) "
-                f"FROM {self.TABLE_NAME} WHERE vendor_id GLOB ?",
+                f"SELECT MAX(CAST(SUBSTR({self.ID_COLUMN}, {prefix_length + 1}) AS INTEGER)) "
+                f"FROM {self.TABLE_NAME} WHERE {self.ID_COLUMN} GLOB ?",
                 (f"{self.ID_PREFIX}[0-9]*",),
             )
             max_row = cur.fetchone()
@@ -237,6 +247,8 @@ class VendorRepository(_VendorDirectoryRepository):
     TABLE_NAME = "vendors"
     SEQ_TABLE_NAME = "vendor_id_seq"
     ID_PREFIX = "VEN"
+    ID_COLUMN = "vendor_id"
+    ID_ATTR = "vendor_id"
     MODEL_CLS = Vendor
 
 
@@ -246,6 +258,8 @@ class RentalVendorRepository(_VendorDirectoryRepository):
     TABLE_NAME = "rental_vendors"
     SEQ_TABLE_NAME = "rental_vendor_id_seq"
     ID_PREFIX = "RNV"
+    ID_COLUMN = "rental_vendor_id"
+    ID_ATTR = "rental_vendor_id"
     MODEL_CLS = RentalVendor
 
 

@@ -53,7 +53,7 @@ class Vendor:
 @dataclass
 class RentalVendor:
     """Rental vendor data model."""
-    vendor_id: str
+    rental_vendor_id: str
     vendor_name: str
     vendor_place: str = ""
     phone: str = ""

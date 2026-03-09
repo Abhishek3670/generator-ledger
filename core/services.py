@@ -738,7 +738,7 @@ def create_vendor(
     return _create_directory_vendor(
         conn,
         table_name="vendors",
-        vendor_id=vendor_id,
+        entity_id=vendor_id,
         vendor_name=vendor_name,
         vendor_place=vendor_place,
         phone=phone,
@@ -748,7 +748,7 @@ def create_vendor(
 
 def create_rental_vendor(
     conn: sqlite3.Connection,
-    vendor_id: str,
+    rental_vendor_id: str,
     vendor_name: str,
     vendor_place: str = "",
     phone: str = ""
@@ -759,7 +759,8 @@ def create_rental_vendor(
     return _create_directory_vendor(
         conn,
         table_name="rental_vendors",
-        vendor_id=vendor_id,
+        id_column="rental_vendor_id",
+        entity_id=rental_vendor_id,
         vendor_name=vendor_name,
         vendor_place=vendor_place,
         phone=phone,
@@ -770,11 +771,12 @@ def create_rental_vendor(
 def _create_directory_vendor(
     conn: sqlite3.Connection,
     table_name: str,
-    vendor_id: str,
+    entity_id: str,
     vendor_name: str,
     vendor_place: str = "",
     phone: str = "",
     entity_label: str = "vendor",
+    id_column: str = "vendor_id",
 ) -> Tuple[bool, str]:
     """
     Create a new vendor-style directory record inside the given table.
@@ -782,13 +784,16 @@ def _create_directory_vendor(
     cur = conn.cursor()
     
     # Check if vendor ID already exists
-    cur.execute(f"SELECT vendor_id FROM {table_name} WHERE vendor_id = ?", (vendor_id,))
+    cur.execute(
+        f"SELECT {id_column} FROM {table_name} WHERE {id_column} = ?",
+        (entity_id,),
+    )
     if cur.fetchone():
-        return False, f"{entity_label.title()} ID '{vendor_id}' already exists"
+        return False, f"{entity_label.title()} ID '{entity_id}' already exists"
     
     # Check if vendor name already exists (case-insensitive)
     cur.execute(
-        f"SELECT vendor_id FROM {table_name} WHERE LOWER(vendor_name) = LOWER(?)",
+        f"SELECT {id_column} FROM {table_name} WHERE LOWER(vendor_name) = LOWER(?)",
         (vendor_name,),
     )
     duplicate = cur.fetchone()
@@ -799,10 +804,10 @@ def _create_directory_vendor(
     
     # Create the new vendor record
     cur.execute(
-        f"""INSERT INTO {table_name} (vendor_id, vendor_name, vendor_place, phone)
+        f"""INSERT INTO {table_name} ({id_column}, vendor_name, vendor_place, phone)
         VALUES (?, ?, ?, ?)""",
-        (vendor_id, vendor_name, vendor_place, phone),
+        (entity_id, vendor_name, vendor_place, phone),
     )
     conn.commit()
     
-    return True, f"✓ Created {entity_label} '{vendor_id}' - {vendor_name}"
+    return True, f"✓ Created {entity_label} '{entity_id}' - {vendor_name}"

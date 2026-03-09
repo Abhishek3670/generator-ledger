@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% macro vendor_section(section_id, title, description, vendors, vendor_kind, empty_message, permissions) %}
+{% macro vendor_section(section_id, title, description, vendors, vendor_kind, empty_message, permissions, id_label, search_placeholder) %}
 <section class="mt-8 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:p-6">
     <div class="flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -24,20 +24,20 @@
         <input
             type="text"
             id="{{ section_id }}Filter"
-            placeholder="Search by Vendor ID, Name, or Location"
+            placeholder="{{ search_placeholder }}"
             class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
         >
     </div>
 
     <div class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div class="overflow-x-auto">
+        <div class="vendor-table-scroll">
             <table class="min-w-full text-sm">
                 <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
-                        <th class="px-6 py-4 text-left font-semibold">Vendor ID</th>
-                        <th class="px-6 py-4 text-left font-semibold">Name</th>
-                        <th class="px-6 py-4 text-left font-semibold">Location</th>
-                        <th class="px-6 py-4 text-left font-semibold">Phone</th>
+                        <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">{{ id_label }}</th>
+                        <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">Name</th>
+                        <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">Location</th>
+                        <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">Phone</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100 text-slate-700" id="{{ section_id }}TableBody">
@@ -45,12 +45,22 @@
                     <tr
                         class="vendor-row transition hover:bg-slate-50"
                         data-vendor-kind="{{ vendor_kind }}"
+                        {% if vendor_kind == "rental" %}
+                        data-rental-vendor-id="{{ vendor.rental_vendor_id }}"
+                        {% else %}
                         data-vendor-id="{{ vendor.vendor_id }}"
+                        {% endif %}
                         data-vendor-name="{{ vendor.vendor_name }}"
                         data-vendor-place="{{ vendor.vendor_place or '' }}"
                         data-vendor-phone="{{ vendor.phone or '' }}"
                     >
-                        <td class="px-6 py-4 font-semibold text-slate-900">{{ vendor.vendor_id }}</td>
+                        <td class="px-6 py-4 font-semibold text-slate-900">
+                            {% if vendor_kind == "rental" %}
+                                {{ vendor.rental_vendor_id }}
+                            {% else %}
+                                {{ vendor.vendor_id }}
+                            {% endif %}
+                        </td>
                         <td class="px-6 py-4">{{ vendor.vendor_name }}</td>
                         <td class="px-6 py-4">{{ vendor.vendor_place or '-' }}</td>
                         <td class="px-6 py-4 relative {% if permissions.get('vendor_management') %}pr-40{% endif %}">
@@ -129,6 +139,10 @@
 .vendor-row.row-actions-open .vendor-row-actions {
     display: flex;
 }
+.vendor-table-scroll {
+    max-height: clamp(20rem, 48vh, 34rem);
+    overflow: auto;
+}
 @media (max-width: 768px) {
     .vendor-row-actions {
         right: 0.45rem;
@@ -138,6 +152,9 @@
     .vendor-row-action-btn {
         font-size: 0.64rem;
         padding: 0.17rem 0.5rem;
+    }
+    .vendor-table-scroll {
+        max-height: clamp(18rem, 44vh, 28rem);
     }
 }
 @media (hover: none), (pointer: coarse) {
@@ -158,29 +175,33 @@
             <div class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Directory</div>
             <h1 class="mt-3 text-3xl font-semibold text-slate-900">Vendors</h1>
             <p class="mt-2 max-w-3xl text-sm text-slate-500">
-                Manage the active retailer directory used in bookings and the separate rental genset directory
-                for marriage halls, guest houses, and hotels.
+                Manage retail vendor records used in bookings and rental vendor records for marriage halls,
+                guest houses, and hotels.
             </p>
         </div>
 
         {{ vendor_section(
             "retailerVendor",
             "Retailer Vendor",
-            "Primary vendor directory used by the existing booking workflow.",
+            "Retail Vendor records of marriage functions or similar on site functions",
             vendors,
             "retailer",
             "No retailer vendors available yet.",
-            permissions
+            permissions,
+            "Vendor ID",
+            "Search by Vendor ID, Name, or Location"
         ) }}
 
         {{ vendor_section(
             "rentalVendor",
             "Rental Vendors",
-            "Separate rental genset records for marriage halls, guest houses, and hotels.",
+            "Rental Vendor records of marriage halls, guest houses, and hotels.",
             rental_vendors or [],
             "rental",
             "No rental vendors available yet.",
-            permissions
+            permissions,
+            "Rental Vendor ID",
+            "Search by Rental Vendor ID, Name, or Location"
         ) }}
     </div>
 </div>
@@ -200,7 +221,9 @@
         <form id="addVendorForm" onsubmit="submitAddVendor(event)" class="space-y-4 px-6 py-5">
             <input id="addVendorKind" type="hidden" value="retailer">
             <div>
-                <label for="vendorName" class="text-sm font-semibold text-slate-700">Vendor Name <span class="text-rose-500">*</span></label>
+                <label for="vendorName" class="text-sm font-semibold text-slate-700">
+                    <span id="addVendorNameLabelText">Vendor Name</span> <span class="text-rose-500">*</span>
+                </label>
                 <input
                     type="text"
                     id="vendorName"
@@ -255,7 +278,9 @@
             <input id="editVendorKind" type="hidden" value="retailer">
             <input id="editVendorId" type="hidden">
             <div>
-                <label for="editVendorIdDisplay" class="text-sm font-semibold text-slate-700">Vendor ID</label>
+                <label for="editVendorIdDisplay" class="text-sm font-semibold text-slate-700">
+                    <span id="editVendorIdLabelText">Vendor ID</span>
+                </label>
                 <input
                     type="text"
                     id="editVendorIdDisplay"
@@ -264,7 +289,9 @@
                 >
             </div>
             <div>
-                <label for="editVendorName" class="text-sm font-semibold text-slate-700">Vendor Name <span class="text-rose-500">*</span></label>
+                <label for="editVendorName" class="text-sm font-semibold text-slate-700">
+                    <span id="editVendorNameLabelText">Vendor Name</span> <span class="text-rose-500">*</span>
+                </label>
                 <input
                     type="text"
                     id="editVendorName"
@@ -369,6 +396,9 @@ function vendorKindConfig(kind) {
             pluralLabel: 'Rental Vendors',
             endpoint: '/api/rental-vendors',
             deleteNote: 'This action is permanent. Rental vendors can be deleted immediately.',
+            idKey: 'rental_vendor_id',
+            idLabel: 'Rental Vendor ID',
+            nameLabel: 'Property Name',
         };
     }
 
@@ -377,7 +407,18 @@ function vendorKindConfig(kind) {
         pluralLabel: 'Retailer Vendors',
         endpoint: '/api/vendors',
         deleteNote: 'This action is permanent. Vendors with existing bookings cannot be deleted.',
+        idKey: 'vendor_id',
+        idLabel: 'Vendor ID',
+        nameLabel: 'Vendor Name',
     };
+}
+
+function getDirectoryIdFromRow(row, vendorKind) {
+    if (!row) return '';
+    if (vendorKind === 'rental') {
+        return row.getAttribute('data-rental-vendor-id') || '';
+    }
+    return row.getAttribute('data-vendor-id') || '';
 }
 
 const addVendorModal = document.getElementById('addVendorModal');
@@ -386,12 +427,15 @@ const addVendorKindInput = document.getElementById('addVendorKind');
 const addVendorBadge = document.getElementById('addVendorBadge');
 const addVendorHeading = document.getElementById('addVendorHeading');
 const addVendorSubmit = document.getElementById('addVendorSubmit');
+const addVendorNameLabelText = document.getElementById('addVendorNameLabelText');
 const editVendorModal = document.getElementById('editVendorModal');
 const editVendorForm = document.getElementById('editVendorForm');
 const editVendorKindInput = document.getElementById('editVendorKind');
 const editVendorBadge = document.getElementById('editVendorBadge');
 const editVendorHeading = document.getElementById('editVendorHeading');
 const editVendorSubmit = document.getElementById('editVendorSubmit');
+const editVendorNameLabelText = document.getElementById('editVendorNameLabelText');
+const editVendorIdLabelText = document.getElementById('editVendorIdLabelText');
 const deleteVendorModal = document.getElementById('deleteVendorModal');
 const deleteVendorHeading = document.getElementById('deleteVendorHeading');
 const deleteVendorTarget = document.getElementById('deleteVendorTarget');
@@ -403,7 +447,7 @@ const editVendorPlace = document.getElementById('editVendorPlace');
 const editVendorPhone = document.getElementById('editVendorPhone');
 const vendorRows = Array.from(document.querySelectorAll('.vendor-row'));
 const isTouchLike = window.matchMedia('(hover: none), (pointer: coarse)').matches;
-let activeDeleteVendorId = '';
+let activeDeleteDirectoryId = '';
 let activeDeleteVendorKind = 'retailer';
 let activeTouchRow = null;
 
@@ -413,6 +457,7 @@ function setAddVendorKind(kind) {
     if (addVendorBadge) addVendorBadge.textContent = `New ${config.label}`;
     if (addVendorHeading) addVendorHeading.textContent = `Add ${config.label}`;
     if (addVendorSubmit) addVendorSubmit.textContent = `Create ${config.label}`;
+    if (addVendorNameLabelText) addVendorNameLabelText.textContent = config.nameLabel;
 }
 
 function setEditVendorKind(kind) {
@@ -421,6 +466,8 @@ function setEditVendorKind(kind) {
     if (editVendorBadge) editVendorBadge.textContent = `${config.label} Profile`;
     if (editVendorHeading) editVendorHeading.textContent = `Edit ${config.label}`;
     if (editVendorSubmit) editVendorSubmit.textContent = `Save ${config.label}`;
+    if (editVendorNameLabelText) editVendorNameLabelText.textContent = config.nameLabel;
+    if (editVendorIdLabelText) editVendorIdLabelText.textContent = config.idLabel;
 }
 
 function setDeleteVendorKind(kind) {
@@ -454,14 +501,14 @@ function closeAddVendorModal() {
 function openEditVendorModalForRow(row) {
     if (!row || !editVendorIdInput || !editVendorName || !editVendorPlace || !editVendorPhone || !editVendorIdDisplay) return;
     const vendorKind = row.getAttribute('data-vendor-kind') || 'retailer';
-    const vendorId = row.getAttribute('data-vendor-id') || '';
+    const directoryId = getDirectoryIdFromRow(row, vendorKind);
     const vendorName = row.getAttribute('data-vendor-name') || '';
     const vendorPlace = row.getAttribute('data-vendor-place') || '';
     const vendorPhone = row.getAttribute('data-vendor-phone') || '';
 
     setEditVendorKind(vendorKind);
-    editVendorIdInput.value = vendorId;
-    editVendorIdDisplay.value = vendorId;
+    editVendorIdInput.value = directoryId;
+    editVendorIdDisplay.value = directoryId;
     editVendorName.value = vendorName;
     editVendorPlace.value = vendorPlace || 'Civil Line';
     editVendorPhone.value = vendorPhone;
@@ -479,21 +526,21 @@ function closeEditVendorModal() {
 function openDeleteVendorModalForRow(row) {
     if (!row) return;
     const vendorKind = row.getAttribute('data-vendor-kind') || 'retailer';
-    const vendorId = row.getAttribute('data-vendor-id') || '';
+    const directoryId = getDirectoryIdFromRow(row, vendorKind);
     const vendorName = row.getAttribute('data-vendor-name') || '';
     const config = vendorKindConfig(vendorKind);
 
-    activeDeleteVendorId = vendorId;
+    activeDeleteDirectoryId = directoryId;
     setDeleteVendorKind(vendorKind);
     if (deleteVendorTarget) {
-        deleteVendorTarget.textContent = `${config.label}: ${vendorName || '-'} (${vendorId || '-'})`;
+        deleteVendorTarget.textContent = `${config.label}: ${vendorName || '-'} (${directoryId || '-'})`;
     }
     openModal(deleteVendorModal);
 }
 
 function closeDeleteVendorModal() {
     closeModal(deleteVendorModal);
-    activeDeleteVendorId = '';
+    activeDeleteDirectoryId = '';
     setDeleteVendorKind('retailer');
     if (deleteVendorTarget) {
         deleteVendorTarget.textContent = '-';
@@ -562,7 +609,7 @@ async function submitAddVendor(e) {
     const phone = document.getElementById('vendorPhone')?.value.trim() || '';
 
     if (!vendor_name) {
-        alert('Vendor Name is required');
+        alert(`${config.nameLabel} is required`);
         return;
     }
 
@@ -580,9 +627,10 @@ async function submitAddVendor(e) {
         });
 
         const data = await response.json();
+        const createdId = data[config.idKey] || '-';
 
         if (response.ok) {
-            alert(`${config.label} created successfully.\nVendor ID: ${data.vendor_id}`);
+            alert(`${config.label} created successfully.\n${config.idLabel}: ${createdId}`);
             closeAddVendorModal();
             location.reload();
         } else if (response.status === 401) {
@@ -600,22 +648,22 @@ async function submitEditVendor(e) {
     e.preventDefault();
     const vendorKind = editVendorKindInput?.value || 'retailer';
     const config = vendorKindConfig(vendorKind);
-    const vendorId = editVendorIdInput?.value || '';
+    const directoryId = editVendorIdInput?.value || '';
     const vendor_name = editVendorName?.value.trim() || '';
     const vendor_place = editVendorPlace?.value.trim() || 'Civil Line';
     const phone = editVendorPhone?.value.trim() || '';
 
-    if (!vendorId) {
-        alert('Vendor ID is missing');
+    if (!directoryId) {
+        alert(`${config.idLabel} is missing`);
         return;
     }
     if (!vendor_name) {
-        alert('Vendor Name is required');
+        alert(`${config.nameLabel} is required`);
         return;
     }
 
     try {
-        const response = await fetch(`${config.endpoint}/${encodeURIComponent(vendorId)}`, {
+        const response = await fetch(`${config.endpoint}/${encodeURIComponent(directoryId)}`, {
             method: 'PATCH',
             headers: {
                 'Content-Type': 'application/json',
@@ -645,13 +693,13 @@ async function submitEditVendor(e) {
 }
 
 async function confirmDeleteVendor() {
-    if (!activeDeleteVendorId) {
+    if (!activeDeleteDirectoryId) {
         return;
     }
 
     const config = vendorKindConfig(activeDeleteVendorKind);
     try {
-        const response = await fetch(`${config.endpoint}/${encodeURIComponent(activeDeleteVendorId)}`, {
+        const response = await fetch(`${config.endpoint}/${encodeURIComponent(activeDeleteDirectoryId)}`, {
             method: 'DELETE',
         });
         const data = await response.json();

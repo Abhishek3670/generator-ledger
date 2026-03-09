@@ -1,0 +1,52 @@
+# Refine Rental/Retail Vendor Directory UI and Rental ID Naming
+
+## Summary
+Apply the requested copy and layout refinements to the `/vendors` page, and do a full rental-only identifier rename from `vendor_id` to `rental_vendor_id` across the rental directory stack. Keep the retailer vendor flow unchanged for bookings and existing vendor APIs.
+
+## Key Changes
+- In [web/templates/vendors.html](/home/aatish/app/genset/web/templates/vendors.html), update the section copy exactly:
+  - Retail description: `Retail Vendor records of marriage functions or similar on site functions`
+  - Rental description: `Rental Vendor records of marriage halls, guest houses, and hotels.`
+- In the rental section only:
+  - Change the table header from `Vendor ID` to `Rental Vendor ID`
+  - Keep the retailer table header as `Vendor ID`
+  - Change the add/edit form label from `Vendor Name` to `Property Name` when the active kind is rental
+  - Keep retailer add/edit labels as `Vendor Name`
+- Add vertical scrolling to both table sections:
+  - Move each table into an internal scroll container with `overflow-y: auto`
+  - Use a responsive fixed height of `clamp(20rem, 48vh, 34rem)` so each table is about half-screen tall
+  - Keep horizontal scrolling intact
+  - Make the table header sticky inside the scroll area so column labels remain visible during vertical scroll
+- In [core/database.py](/home/aatish/app/genset/core/database.py), rename the rental table column from `vendor_id` to `rental_vendor_id`:
+  - New installs should create `rental_vendors(rental_vendor_id TEXT PRIMARY KEY, ...)`
+  - Existing installs should migrate in `init_schema` by detecting the old `vendor_id` column and renaming it to `rental_vendor_id`
+- In [web/app.py](/home/aatish/app/genset/web/app.py) and the rental-only repository/model/service path:
+  - Rename the rental model/repository attribute to `rental_vendor_id`
+  - Rename rental route function parameters to `rental_vendor_id`
+  - Rename rental API request/response fields from `vendor_id` to `rental_vendor_id`
+  - Update rental JS DOM attributes and modal state to use `rental_vendor_id`
+  - Leave retailer endpoints and booking payloads on `vendor_id`
+
+## API / Data Contract Changes
+- Rental-only API contract becomes explicit:
+  - `POST /api/rental-vendors` accepts optional `rental_vendor_id` and returns `rental_vendor_id`
+  - `PATCH /api/rental-vendors/{rental_vendor_id}` uses the renamed parameter
+  - `DELETE /api/rental-vendors/{rental_vendor_id}` uses the renamed parameter
+  - `GET /api/rental-vendors` returns rental records keyed with `rental_vendor_id`
+- Retail vendor APIs stay as-is to avoid breaking booking-related flows.
+
+## Test Plan
+- Update rental CRUD tests to assert `rental_vendor_id` everywhere and verify the migration-safe rental repository still reads/writes correctly.
+- Add/adjust a vendors page test to assert:
+  - the exact new section descriptions
+  - `Rental Vendor ID` appears only in the rental table
+  - `Property Name` appears in rental modal/form content
+  - the table scroll container classes/structure are present
+- Add a schema migration test that starts with `rental_vendors(vendor_id, ...)`, runs schema init, and verifies data survives under `rental_vendor_id`.
+- Re-run existing retailer vendor tests to confirm bookings and retailer CRUD are unaffected.
+
+## Assumptions
+- Chosen from your reply: the rental identifier rename is a full rename through the rental-only stack, not just a UI/database rename.
+- `Property Name` will be used for both rental add and rental edit forms for consistency, even though you only explicitly called out the add form.
+- The rental table `Name` column remains `Name`; only the identifier header changes to `Rental Vendor ID`.
+- No booking workflow will consume rental vendors after this refinement; retailer vendors remain the only booking-linked vendor source.

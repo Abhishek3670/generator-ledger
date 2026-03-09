@@ -48,14 +48,19 @@ def _auth_headers(client: TestClient) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_vendors_page_renders_retailer_and_rental_sections(app_client_and_conn):
+def test_vendors_page_renders_refined_retailer_and_rental_sections(app_client_and_conn):
     _web_app_module, client, conn = app_client_and_conn
 
     vendor_repo = VendorRepository(conn)
     rental_vendor_repo = RentalVendorRepository(conn)
     vendor_repo.save(Vendor(vendor_id="VEN001", vendor_name="Retail Partner", vendor_place="Civil Line", phone="111"))
     rental_vendor_repo.save(
-        RentalVendor(vendor_id="RNV001", vendor_name="Hotel Residency", vendor_place="Downtown", phone="222")
+        RentalVendor(
+            rental_vendor_id="RNV001",
+            vendor_name="Hotel Residency",
+            vendor_place="Downtown",
+            phone="222",
+        )
     )
 
     response = client.get("/vendors", headers=_auth_headers(client))
@@ -65,9 +70,15 @@ def test_vendors_page_renders_retailer_and_rental_sections(app_client_and_conn):
 
     assert "Retailer Vendor" in html
     assert "Rental Vendors" in html
+    assert "Retail Vendor records of marriage functions or similar on site functions" in html
+    assert "Rental Vendor records of marriage halls, guest houses, and hotels." in html
     assert "Retail Partner" in html
     assert "Hotel Residency" in html
     assert 'data-vendor-kind="retailer"' in html
     assert 'data-vendor-kind="rental"' in html
+    assert 'data-rental-vendor-id="RNV001"' in html
     assert "+ Add Retailer Vendor" in html
     assert "+ Add Rental Vendor" in html
+    assert "Rental Vendor ID" in html
+    assert "Property Name" in html
+    assert 'class="vendor-table-scroll"' in html

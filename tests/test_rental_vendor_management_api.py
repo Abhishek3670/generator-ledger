@@ -41,7 +41,7 @@ def test_create_rental_vendor_success_with_generated_id(app_module_and_conn):
     web_app_module, conn = app_module_and_conn
     payload = asyncio.run(
         web_app_module.api_create_rental_vendor(
-            request_data=web_app_module.CreateVendorRequest(
+            request_data=web_app_module.CreateRentalVendorRequest(
                 vendor_name="Royal Banquet",
                 vendor_place="Civil Line",
                 phone="111",
@@ -51,11 +51,12 @@ def test_create_rental_vendor_success_with_generated_id(app_module_and_conn):
     )
 
     assert payload["success"] is True
-    assert payload["vendor_id"] == "RNV001"
+    assert payload["rental_vendor_id"] == "RNV001"
 
     repo = RentalVendorRepository(conn)
     created = repo.get_by_id("RNV001")
     assert created is not None
+    assert created.rental_vendor_id == "RNV001"
     assert created.vendor_name == "Royal Banquet"
     assert created.vendor_place == "Civil Line"
     assert created.phone == "111"
@@ -64,21 +65,52 @@ def test_create_rental_vendor_success_with_generated_id(app_module_and_conn):
 def test_rental_vendors_list_returns_saved_rows(app_module_and_conn):
     web_app_module, conn = app_module_and_conn
     repo = RentalVendorRepository(conn)
-    repo.save(RentalVendor(vendor_id="RNV001", vendor_name="Hotel One", vendor_place="Downtown", phone="222"))
-    repo.save(RentalVendor(vendor_id="RNV002", vendor_name="Guest House Two", vendor_place="Station Road", phone="333"))
+    repo.save(
+        RentalVendor(
+            rental_vendor_id="RNV001",
+            vendor_name="Hotel One",
+            vendor_place="Downtown",
+            phone="222",
+        )
+    )
+    repo.save(
+        RentalVendor(
+            rental_vendor_id="RNV002",
+            vendor_name="Guest House Two",
+            vendor_place="Station Road",
+            phone="333",
+        )
+    )
 
     payload = asyncio.run(web_app_module.api_rental_vendors(conn=conn))
 
     assert payload == [
-        {"id": "RNV001", "name": "Hotel One", "place": "Downtown", "phone": "222"},
-        {"id": "RNV002", "name": "Guest House Two", "place": "Station Road", "phone": "333"},
+        {
+            "rental_vendor_id": "RNV001",
+            "name": "Hotel One",
+            "place": "Downtown",
+            "phone": "222",
+        },
+        {
+            "rental_vendor_id": "RNV002",
+            "name": "Guest House Two",
+            "place": "Station Road",
+            "phone": "333",
+        },
     ]
 
 
 def test_update_rental_vendor_success(app_module_and_conn):
     web_app_module, conn = app_module_and_conn
     repo = RentalVendorRepository(conn)
-    repo.save(RentalVendor(vendor_id="RNV001", vendor_name="Hotel One", vendor_place="Civil Line", phone="111"))
+    repo.save(
+        RentalVendor(
+            rental_vendor_id="RNV001",
+            vendor_name="Hotel One",
+            vendor_place="Civil Line",
+            phone="111",
+        )
+    )
 
     payload = asyncio.run(
         web_app_module.api_update_rental_vendor(
@@ -94,7 +126,7 @@ def test_update_rental_vendor_success(app_module_and_conn):
 
     assert payload["success"] is True
     assert payload["vendor"] == {
-        "id": "RNV001",
+        "rental_vendor_id": "RNV001",
         "name": "Hotel Prime",
         "place": "Lake View",
         "phone": "+1-555-0101",
@@ -102,6 +134,7 @@ def test_update_rental_vendor_success(app_module_and_conn):
 
     updated = repo.get_by_id("RNV001")
     assert updated is not None
+    assert updated.rental_vendor_id == "RNV001"
     assert updated.vendor_name == "Hotel Prime"
     assert updated.vendor_place == "Lake View"
     assert updated.phone == "+1-555-0101"
@@ -110,8 +143,8 @@ def test_update_rental_vendor_success(app_module_and_conn):
 def test_update_rental_vendor_duplicate_name_returns_400(app_module_and_conn):
     web_app_module, conn = app_module_and_conn
     repo = RentalVendorRepository(conn)
-    repo.save(RentalVendor(vendor_id="RNV001", vendor_name="Hotel One"))
-    repo.save(RentalVendor(vendor_id="RNV002", vendor_name="Hotel Two"))
+    repo.save(RentalVendor(rental_vendor_id="RNV001", vendor_name="Hotel One"))
+    repo.save(RentalVendor(rental_vendor_id="RNV002", vendor_name="Hotel Two"))
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
@@ -133,7 +166,7 @@ def test_update_rental_vendor_duplicate_name_returns_400(app_module_and_conn):
 def test_delete_rental_vendor_success(app_module_and_conn):
     web_app_module, conn = app_module_and_conn
     repo = RentalVendorRepository(conn)
-    repo.save(RentalVendor(vendor_id="RNV001", vendor_name="Hotel One"))
+    repo.save(RentalVendor(rental_vendor_id="RNV001", vendor_name="Hotel One"))
 
     payload = asyncio.run(web_app_module.api_delete_rental_vendor("RNV001", conn=conn))
 
@@ -149,3 +182,43 @@ def test_delete_rental_vendor_not_found_returns_404(app_module_and_conn):
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail == "Rental vendor not found"
+
+
+def test_init_schema_migrates_legacy_rental_vendor_id_column(tmp_path):
+    db_path = tmp_path / "legacy_rental_vendor_schema.db"
+    db = DatabaseManager(str(db_path))
+    conn = db.connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE rental_vendors (
+                vendor_id TEXT PRIMARY KEY,
+                vendor_name TEXT NOT NULL,
+                vendor_place TEXT,
+                phone TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO rental_vendors (vendor_id, vendor_name, vendor_place, phone)
+            VALUES ('RNV001', 'Legacy Hotel', 'Civil Line', '111')
+            """
+        )
+        conn.commit()
+
+        db.init_schema()
+
+        cur.execute("PRAGMA table_info(rental_vendors)")
+        columns = [row[1] for row in cur.fetchall()]
+        assert "rental_vendor_id" in columns
+        assert "vendor_id" not in columns
+
+        repo = RentalVendorRepository(conn)
+        vendor = repo.get_by_id("RNV001")
+        assert vendor is not None
+        assert vendor.rental_vendor_id == "RNV001"
+        assert vendor.vendor_name == "Legacy Hotel"
+    finally:
+        db.close()

@@ -64,7 +64,7 @@ class DatabaseManager:
             );
 
             CREATE TABLE IF NOT EXISTS rental_vendors (
-                vendor_id TEXT PRIMARY KEY,
+                rental_vendor_id TEXT PRIMARY KEY,
                 vendor_name TEXT NOT NULL,
                 vendor_place TEXT,
                 phone TEXT
@@ -180,6 +180,14 @@ class DatabaseManager:
             CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires_at
                 ON revoked_tokens(expires_at);
             """)
+            # Migrate legacy rental_vendors.vendor_id column to rental_vendor_id
+            cur.execute("PRAGMA table_info(rental_vendors)")
+            rental_vendor_cols = {row[1] for row in cur.fetchall()}
+            if "vendor_id" in rental_vendor_cols and "rental_vendor_id" not in rental_vendor_cols:
+                cur.execute(
+                    "ALTER TABLE rental_vendors RENAME COLUMN vendor_id TO rental_vendor_id"
+                )
+
             # Ensure booking_history has user column for audit trail
             cur.execute("PRAGMA table_info(booking_history)")
             existing_cols = {row[1] for row in cur.fetchall()}
