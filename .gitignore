@@ -68,6 +68,5 @@ Backup/
 # Jupyter
 .ipynb_checkpoints/
 *.md
-!VERSIONING.md
 !CHANGELOG.md
 *.txt
