@@ -64,6 +64,7 @@ htmlcov/
 # Archives (these contain backups)
 archives/
 Backup/
+exported_data/
 
 # Jupyter
 .ipynb_checkpoints/

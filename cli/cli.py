@@ -5,6 +5,7 @@ Command-line interface for the Generator Booking Ledger.
 import sqlite3
 import pandas as pd
 import logging
+import re
 from typing import Optional
 
 from core import (
@@ -12,10 +13,19 @@ from core import (
     BookingService,
     DataLoader,
     ExportService,
+    Generator,
     GeneratorRepository,
 )
 from core.services import archive_all_bookings, create_vendor
-from config import LOAD_SEED_DATA, OWNER_USERNAME, OWNER_PASSWORD
+from config import (
+    LOAD_SEED_DATA,
+    OWNER_USERNAME,
+    OWNER_PASSWORD,
+    GEN_STATUS_ACTIVE,
+    GEN_STATUS_INACTIVE,
+    GEN_INVENTORY_RETAILER,
+    GEN_INVENTORY_EMERGENCY,
+)
 from core.auth import ensure_owner_user
 
 
@@ -90,10 +100,11 @@ class CLI:
                 print("9. Archive all bookings (clear for new month)")
                 print("10. Add new vendor")
                 print("11. Delete generator")
-                print("12. Exit")
+                print("12. Add new generator capacity")
+                print("13. Exit")
                 print("=" * 50)
                 
-                choice = input("Choose an option (1-12): ").strip()
+                choice = input("Choose an option (1-13): ").strip()
                 
                 try:
                     if choice == '1':
@@ -184,11 +195,13 @@ class CLI:
                     elif choice == '11':
                         self.delete_generator_interactive()
                     elif choice == '12':
+                        self.add_generator_capacity_interactive()
+                    elif choice == '13':
                         self.logger.info("User requested exit")
                         print('Goodbye!')
                         break
                     else:
-                        print('Invalid choice. Please enter 1-12.')
+                        print('Invalid choice. Please enter 1-13.')
                         
                 except Exception as e:
                     self.logger.error("CLI operation failed", exc_info=True)
@@ -324,6 +337,94 @@ class CLI:
             print(f'✓ {msg}')
         else:
             print(f'✗ Failed: {msg}')
+
+    def add_generator_capacity_interactive(self) -> None:
+        """Interactive generator creation to add a new capacity option."""
+        capacity_input = input('Capacity kVA (e.g., 45): ').strip()
+        try:
+            capacity_kva = int(capacity_input)
+            if capacity_kva <= 0:
+                raise ValueError()
+        except ValueError:
+            print("✗ Capacity must be a positive integer")
+            return
+
+        generator_type = input('Generator Type (default: Standard): ').strip() or "Standard"
+        identification = input('Identification (optional): ').strip()
+        notes = input('Notes (optional): ').strip()
+
+        status_input = (
+            input(
+                f"Status [{GEN_STATUS_ACTIVE}/{GEN_STATUS_INACTIVE}] "
+                f"(default: {GEN_STATUS_ACTIVE}): "
+            ).strip()
+            or GEN_STATUS_ACTIVE
+        )
+        status_lookup = {
+            GEN_STATUS_ACTIVE.lower(): GEN_STATUS_ACTIVE,
+            GEN_STATUS_INACTIVE.lower(): GEN_STATUS_INACTIVE,
+        }
+        status = status_lookup.get(status_input.lower())
+        if not status:
+            print(f"✗ Invalid status. Use {GEN_STATUS_ACTIVE} or {GEN_STATUS_INACTIVE}")
+            return
+
+        inventory_type = (
+            input(
+                f"Inventory type [{GEN_INVENTORY_RETAILER}/{GEN_INVENTORY_EMERGENCY}] "
+                f"(default: {GEN_INVENTORY_RETAILER}): "
+            ).strip().lower()
+            or GEN_INVENTORY_RETAILER
+        )
+        if inventory_type not in {GEN_INVENTORY_RETAILER, GEN_INVENTORY_EMERGENCY}:
+            print(
+                "✗ Invalid inventory type. "
+                f"Use {GEN_INVENTORY_RETAILER} or {GEN_INVENTORY_EMERGENCY}"
+            )
+            return
+
+        def normalize_token(value: str) -> str:
+            return re.sub(r"[^A-Za-z0-9]+", "", value.upper())
+
+        type_token = normalize_token(generator_type)
+        if not type_token:
+            print("✗ Generator type must include at least one alphanumeric character")
+            return
+
+        ident_token = normalize_token(identification) if identification else ""
+        parts = ["GEN", f"{capacity_kva}KVA"]
+        if ident_token:
+            parts.append(ident_token)
+        parts.append(type_token)
+
+        repo = GeneratorRepository(self.conn)
+        base_count = repo.count_by_capacity(capacity_kva)
+        counter = base_count
+        generator_id = ""
+
+        while True:
+            counter += 1
+            candidate = "-".join(parts + [f"{counter:02d}"])
+            if not repo.get_by_id(candidate):
+                generator_id = candidate
+                break
+
+        try:
+            repo.save(
+                Generator(
+                    generator_id=generator_id,
+                    capacity_kva=capacity_kva,
+                    identification=identification,
+                    type=generator_type,
+                    status=status,
+                    notes=notes,
+                    inventory_type=inventory_type,
+                )
+            )
+            print(f"✓ Added generator {generator_id} ({capacity_kva} kVA)")
+        except Exception as e:
+            self.logger.error("Generator capacity creation failed", exc_info=True)
+            print(f"✗ Failed: {e}")
 
     def delete_generator_interactive(self) -> None:
         """Interactive generator deletion (blocked if bookings exist)."""
