@@ -11,7 +11,14 @@ They should be treated as retrospective release notes, not as proof of exact his
 
 ## [Unreleased]
 
-- No unreleased changes documented after `2.1.0` yet.
+### Added
+
+- CLI option to add a new generator capacity record directly from terminal flow.
+
+### Changed
+
+- CLI menu now includes a dedicated "Add new generator capacity" action.
+- `exported_data/` artifacts are now ignored and no longer tracked in git.
 
 ## [2.1.0]
 
