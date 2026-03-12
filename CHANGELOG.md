@@ -8,8 +8,16 @@ Versioning was introduced after the project already had active development histo
 
 The entries below for `1.0.0` through `2.1.0` are inferred from git commit groupings and feature milestones.
 They should be treated as retrospective release notes, not as proof of exact historical deployment tags.
+Starting with `2.2.0`, entries are maintained as active release documentation.
 
 ## [Unreleased]
+
+- No unreleased changes documented after `2.2.0` yet.
+
+## [2.2.0]
+
+Status: current repository state / next deployment target  
+Basis: commits `18076c9` through `d27bf7a`
 
 ### Added
 
@@ -22,7 +30,7 @@ They should be treated as retrospective release notes, not as proof of exact his
 
 ## [2.1.0]
 
-Status: current repository state / next deployment target  
+Status: inferred local milestone  
 Basis: inferred from commits `7823c8f` through `6f9bfe9`
 
 ### Added

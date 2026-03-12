@@ -70,4 +70,5 @@ exported_data/
 .ipynb_checkpoints/
 *.md
 !CHANGELOG.md
+!VERSIONING.md
 *.txt
