@@ -12,7 +12,17 @@ Starting with `2.2.0`, entries are maintained as active release documentation.
 
 ## [Unreleased]
 
-- No unreleased changes documented after `2.2.0` yet.
+- No unreleased changes documented after `3.0.0` yet.
+
+## [3.0.0]
+
+Status: current repository state / next deployment target  
+Basis: changes after tagged release `v2.2.0`
+
+### Changed
+
+- Docker Compose now requires an explicit `APP_IMAGE_TAG` so release deployments do not fall back silently to a hardcoded image tag.
+- Versioned Docker release examples now target `v3.0.0` in the environment example and command reference.
 
 ## [2.2.0]
 

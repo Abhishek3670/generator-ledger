@@ -17,9 +17,14 @@ These inferred versions are suitable for documentation and future reference, but
   Meaning: the Docker app currently running on the server before the emergency-genset follow-up work.
 
 - `v2.2.0`
+  Status: latest tagged local release
+  Environment: local git tag / most recent release baseline
+  Meaning: emergency genset inventory flow plus CLI capacity add flow and exported data tracking cleanup.
+
+- `v3.0.0`
   Status: current repository version / next deployment target
   Environment: local repository / next deployment target
-  Meaning: current codebase including emergency genset inventory flow plus CLI capacity add flow and exported data tracking cleanup.
+  Meaning: release-oriented Docker Compose cutovers now require an explicit image tag and use versioned deployment examples.
 
 ## Inferred Release Timeline
 
@@ -31,7 +36,8 @@ These inferred versions are suitable for documentation and future reference, but
 | `1.3.0` | Inferred historical milestone | `51455a5` -> `fdc30fb` | Historical | Monitor tab, history redesign, vendor actions, permission matrix, billing permission tightening |
 | `2.0.0` | Inferred deployed baseline | `744ad2e` -> `ab14db4` | `Pre-prod` | Repository refactor, security hardening, env support, permissions expansion, session Docker/LAN handling, rental vendors |
 | `2.1.0` | Inferred local milestone | `7823c8f` -> `6f9bfe9` | Local repository history | Emergency genset inventory and fallback flow, emergency billing styling, versioning and changelog docs |
-| `2.2.0` | Current repo version | `18076c9` -> `d27bf7a` | Local repo / next `Pre-prod` release | CLI generator-capacity add option, exported data untracked from git, and release-note updates |
+| `2.2.0` | Tagged local release | `18076c9` -> `de113ca` | Local repo / previous `Pre-prod` target | CLI generator-capacity add option, exported data untracked from git, and release-note updates |
+| `3.0.0` | Current repo version | Post-`v2.2.0` working tree | Local repo / next `Pre-prod` release | Explicit `APP_IMAGE_TAG` requirement in Compose plus versioned Docker release examples |
 
 ## Note On `2.0.1`
 
@@ -105,7 +111,8 @@ Before a release:
 Starting point from now on:
 
 - Treat the currently running server Docker app as `v2.0.0`.
-- Treat the current repository state as `v2.2.0`.
+- Treat the most recent tagged local release as `v2.2.0`.
+- Treat the current repository state as `v3.0.0`.
 - Keep future release notes in [CHANGELOG.md](/home/aatish/app/genset/CHANGELOG.md).
 - Only add a retrospective version entry when you have either:
   - a clear commit milestone, or

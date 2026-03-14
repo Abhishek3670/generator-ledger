@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "genset"
-version = "2.2.0"
+version = "3.0.0"
 description = "Generator and Booking Management System"
 requires-python = ">=3.12"
 dependencies = [

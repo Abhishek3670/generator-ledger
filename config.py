@@ -58,7 +58,7 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
 # Application Configuration
 APP_TITLE = "Generator Booking Ledger"
-APP_VERSION = "2.2.0"
+APP_VERSION = "3.0.0"
 
 # Date/Time Configuration
 DATETIME_FORMAT = "%Y-%m-%d %H:%M"

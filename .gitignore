@@ -72,3 +72,4 @@ exported_data/
 !CHANGELOG.md
 !VERSIONING.md
 *.txt
+ATOMIC_DOCKER_DEPLOYMENT.md
