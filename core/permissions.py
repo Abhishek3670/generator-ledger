@@ -65,9 +65,10 @@ PERMISSION_MATRIX_CAPABILITIES = (
     {
         "key": CAPABILITY_GENERATOR_MANAGEMENT,
         "label": "Generator Management",
-        "description": "Create generator records.",
+        "description": "Create and update generator records.",
         "endpoint_refs": (
             "POST /api/generators",
+            "PATCH /api/generators/{generator_id}",
         ),
         "admin_allowed": True,
         "operator_allowed": False,

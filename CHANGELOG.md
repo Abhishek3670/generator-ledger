@@ -12,11 +12,33 @@ Starting with `2.2.0`, entries are maintained as active release documentation.
 
 ## [Unreleased]
 
-- No unreleased changes documented after `3.0.0` yet.
+- No unreleased changes documented after `3.1.0` yet.
+
+## [3.1.0]
+
+Status: current repository state / next deployment target  
+Basis: changes after release commit `7c91444`
+
+### Added
+
+- Permanent Genset inventory support with Rental Vendor assignment on generator records.
+- Generator update API and in-page edit flow for moving existing gensets between retailer, permanent, and emergency inventory groups.
+- Validation and schema support for persisting `rental_vendor_id` on permanent generator records.
+
+### Changed
+
+- The generators page now renders Retailer Genset, Permanent Genset, and Emergency Genset sections.
+- Permanent Genset rows now show the assigned Rental Vendor instead of booking status.
+- Create-booking and edit-booking flows now exclude Permanent Gensets from selectable booking stock.
+- Generator API responses now include rental-vendor assignment metadata for permanent inventory rows.
+
+### Fixed
+
+- Booking auto-assignment and manual booking validation now prevent permanently assigned gensets from entering retailer or emergency booking stock.
 
 ## [3.0.0]
 
-Status: current repository state / next deployment target  
+Status: documented local release baseline / previous deployment target  
 Basis: changes after tagged release `v2.2.0`
 
 ### Changed

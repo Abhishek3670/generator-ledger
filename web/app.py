@@ -19,7 +19,7 @@ from typing import Optional, List, Dict, Any, Tuple
 import logging
 import re
 import hashlib
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import jwt
 try:
     import psutil
@@ -118,6 +118,7 @@ from config import (
     GEN_STATUS_INACTIVE,
     GEN_STATUS_MAINTENANCE,
     GEN_INVENTORY_RETAILER,
+    GEN_INVENTORY_PERMANENT,
     GEN_INVENTORY_EMERGENCY,
     DATETIME_FORMAT,
 )
@@ -127,7 +128,12 @@ logger = logging.getLogger(__name__)
 
 GENERATOR_INVENTORY_LABELS = {
     GEN_INVENTORY_RETAILER: "Retailer Genset",
+    GEN_INVENTORY_PERMANENT: "Permanent Genset",
     GEN_INVENTORY_EMERGENCY: "Emergency Genset",
+}
+BOOKABLE_GENERATOR_INVENTORY_TYPES = {
+    GEN_INVENTORY_RETAILER,
+    GEN_INVENTORY_EMERGENCY,
 }
 
 # Pydantic models for request bodies
@@ -267,13 +273,14 @@ class UpdateVendorRequest(BaseModel):
         return v
 
 
-class CreateGeneratorRequest(BaseModel):
+class BaseGeneratorRequest(BaseModel):
     capacity_kva: int = Field(..., gt=0)  # Must be > 0
     type: str = Field(..., min_length=1, max_length=100)
     identification: str = Field(default="", max_length=200)
     notes: str = Field(default="", max_length=500)
     status: Optional[str] = Field(default=GEN_STATUS_ACTIVE, max_length=50)
     inventory_type: str = Field(default=GEN_INVENTORY_RETAILER, max_length=50)
+    rental_vendor_id: Optional[str] = Field(default=None, max_length=50)
 
     @field_validator('type')
     @classmethod
@@ -309,11 +316,44 @@ class CreateGeneratorRequest(BaseModel):
     @classmethod
     def validate_inventory_type(cls, v):
         normalized = (v or "").strip().lower()
-        if normalized not in {GEN_INVENTORY_RETAILER, GEN_INVENTORY_EMERGENCY}:
+        if normalized not in {
+            GEN_INVENTORY_RETAILER,
+            GEN_INVENTORY_PERMANENT,
+            GEN_INVENTORY_EMERGENCY,
+        }:
             raise ValueError(
-                f'Inventory type must be one of: {GEN_INVENTORY_RETAILER}, {GEN_INVENTORY_EMERGENCY}'
+                "Inventory type must be one of: "
+                f"{GEN_INVENTORY_RETAILER}, {GEN_INVENTORY_PERMANENT}, {GEN_INVENTORY_EMERGENCY}"
             )
         return normalized
+
+    @field_validator('rental_vendor_id')
+    @classmethod
+    def validate_rental_vendor_id(cls, v):
+        if v is None:
+            return None
+        normalized = v.strip()
+        if not normalized:
+            return None
+        if '<' in normalized or '>' in normalized or 'script' in normalized.lower():
+            raise ValueError('HTML/script tags not allowed in Rental Vendor ID')
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_inventory_assignment(self):
+        if self.inventory_type == GEN_INVENTORY_PERMANENT and not self.rental_vendor_id:
+            raise ValueError("Rental Vendor is required for Permanent Genset")
+        if self.inventory_type != GEN_INVENTORY_PERMANENT:
+            self.rental_vendor_id = None
+        return self
+
+
+class CreateGeneratorRequest(BaseGeneratorRequest):
+    pass
+
+
+class UpdateGeneratorRequest(BaseGeneratorRequest):
+    pass
 
 
 class LoginRequest(BaseModel):
@@ -569,6 +609,97 @@ def _build_booking_tree_block(conn: sqlite3.Connection, booking: Any) -> Dict[st
         "booking": booking,
         "rowspan": max(1, len(date_rows)),
         "date_rows": date_rows,
+    }
+
+
+def _is_bookable_generator_inventory(value: Optional[str]) -> bool:
+    return normalize_generator_inventory_type(value) in BOOKABLE_GENERATOR_INVENTORY_TYPES
+
+
+def _bookable_generators(generators: List[Generator]) -> List[Generator]:
+    return [gen for gen in generators if _is_bookable_generator_inventory(gen.inventory_type)]
+
+
+def _build_rental_vendor_name_map(conn: sqlite3.Connection) -> Dict[str, str]:
+    rental_vendor_repo = RentalVendorRepository(conn)
+    return {
+        vendor.rental_vendor_id: vendor.vendor_name
+        for vendor in rental_vendor_repo.get_all()
+    }
+
+
+def _hydrate_generator_rental_vendor_metadata(
+    generators: List[Generator],
+    rental_vendor_names: Dict[str, str],
+) -> List[Generator]:
+    for generator in generators:
+        if normalize_generator_inventory_type(generator.inventory_type) == GEN_INVENTORY_PERMANENT:
+            generator.rental_vendor_name = rental_vendor_names.get(generator.rental_vendor_id, "")
+        else:
+            generator.rental_vendor_id = ""
+            generator.rental_vendor_name = ""
+    return generators
+
+
+def _validate_generator_payload(
+    request_data: BaseGeneratorRequest,
+    conn: sqlite3.Connection,
+) -> Dict[str, Any]:
+    try:
+        capacity_kva = int(request_data.capacity_kva)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Capacity (kVA) must be a number")
+
+    if capacity_kva <= 0:
+        raise HTTPException(status_code=400, detail="Capacity (kVA) must be greater than zero")
+
+    type_raw = (request_data.type or "").strip()
+    if not type_raw:
+        raise HTTPException(status_code=400, detail="Type is required")
+
+    identification_raw = (request_data.identification or "").strip()
+    notes_raw = (request_data.notes or "").strip()
+    status_raw = (request_data.status or GEN_STATUS_ACTIVE).strip()
+    inventory_type_raw = normalize_generator_inventory_type(request_data.inventory_type)
+    rental_vendor_id_raw = (request_data.rental_vendor_id or "").strip()
+
+    if status_raw not in {GEN_STATUS_ACTIVE, GEN_STATUS_INACTIVE}:
+        raise HTTPException(status_code=400, detail="Operational Status must be Active or Inactive")
+
+    if inventory_type_raw not in {
+        GEN_INVENTORY_RETAILER,
+        GEN_INVENTORY_PERMANENT,
+        GEN_INVENTORY_EMERGENCY,
+    }:
+        raise HTTPException(
+            status_code=400,
+            detail="Inventory type must be retailer, permanent, or emergency",
+        )
+
+    rental_vendor_name = ""
+    if inventory_type_raw == GEN_INVENTORY_PERMANENT:
+        if not rental_vendor_id_raw:
+            raise HTTPException(status_code=400, detail="Rental Vendor is required for Permanent Genset")
+        rental_vendor_repo = RentalVendorRepository(conn)
+        rental_vendor = rental_vendor_repo.get_by_id(rental_vendor_id_raw)
+        if not rental_vendor:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rental Vendor '{rental_vendor_id_raw}' not found",
+            )
+        rental_vendor_name = rental_vendor.vendor_name
+    else:
+        rental_vendor_id_raw = ""
+
+    return {
+        "capacity_kva": capacity_kva,
+        "type": type_raw,
+        "identification": identification_raw,
+        "notes": notes_raw,
+        "status": status_raw,
+        "inventory_type": inventory_type_raw,
+        "rental_vendor_id": rental_vendor_id_raw,
+        "rental_vendor_name": rental_vendor_name,
     }
 
 def template_context(request: Request, **kwargs: Any) -> Dict[str, Any]:
@@ -1472,8 +1603,13 @@ async def generators_page(
     try:
         gen_repo = GeneratorRepository(conn)
         generators = gen_repo.get_all()
+        rental_vendor_names = _build_rental_vendor_name_map(conn)
+        generators = _hydrate_generator_rental_vendor_metadata(generators, rental_vendor_names)
         retailer_generators = [
             gen for gen in generators if gen.inventory_type == GEN_INVENTORY_RETAILER
+        ]
+        permanent_generators = [
+            gen for gen in generators if gen.inventory_type == GEN_INVENTORY_PERMANENT
         ]
         emergency_generators = [
             gen for gen in generators if gen.inventory_type == GEN_INVENTORY_EMERGENCY
@@ -1511,6 +1647,7 @@ async def generators_page(
             request,
             generators=generators,
             retailer_generators=retailer_generators,
+            permanent_generators=permanent_generators,
             emergency_generators=emergency_generators,
             booking_status=booking_status,
             selected_date=selected_date or "",
@@ -1971,7 +2108,7 @@ async def create_booking_page(
         gen_repo = GeneratorRepository(conn)
         
         vendors = vendor_repo.get_all()
-        generators = gen_repo.get_all()
+        generators = _bookable_generators(gen_repo.get_all())
         
         # Get unique capacities
         capacities = sorted(set(g.capacity_kva for g in generators))
@@ -2058,7 +2195,7 @@ async def edit_booking_page(
         
         vendor = vendor_repo.get_by_id(booking.vendor_id)
         items = booking_repo.get_items(booking_id)
-        generators = gen_repo.get_all()
+        generators = _bookable_generators(gen_repo.get_all())
         capacities = sorted(set(g.capacity_kva for g in generators))
         
         # Enrich items with generator info
@@ -2405,6 +2542,8 @@ async def api_generators(
     try:
         gen_repo = GeneratorRepository(conn)
         generators = gen_repo.get_all()
+        rental_vendor_names = _build_rental_vendor_name_map(conn)
+        generators = _hydrate_generator_rental_vendor_metadata(generators, rental_vendor_names)
         return [
             {
                 "id": g.generator_id,
@@ -2414,6 +2553,8 @@ async def api_generators(
                 "status": g.status,
                 "notes": g.notes,
                 "inventory_type": g.inventory_type,
+                "rental_vendor_id": g.rental_vendor_id or "",
+                "rental_vendor_name": g.rental_vendor_name or "",
                 "inventory_label": GENERATOR_INVENTORY_LABELS.get(
                     g.inventory_type,
                     GENERATOR_INVENTORY_LABELS[GEN_INVENTORY_RETAILER],
@@ -2468,29 +2609,15 @@ async def api_create_generator(
 ):
     """Create a new generator with auto-generated ID."""
     try:
-        try:
-            capacity_kva = int(request_data.capacity_kva)
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="Capacity (kVA) must be a number")
-
-        if capacity_kva <= 0:
-            raise HTTPException(status_code=400, detail="Capacity (kVA) must be greater than zero")
-
-        type_raw = (request_data.type or "").strip()
-        if not type_raw:
-            raise HTTPException(status_code=400, detail="Type is required")
-
-        identification_raw = (request_data.identification or "").strip()
-        notes_raw = (request_data.notes or "").strip()
-        status_raw = (request_data.status or GEN_STATUS_ACTIVE).strip()
-        inventory_type_raw = normalize_generator_inventory_type(request_data.inventory_type)
-        if status_raw not in {GEN_STATUS_ACTIVE, GEN_STATUS_INACTIVE}:
-            raise HTTPException(status_code=400, detail="Operational Status must be Active or Inactive")
-        if inventory_type_raw not in {GEN_INVENTORY_RETAILER, GEN_INVENTORY_EMERGENCY}:
-            raise HTTPException(
-                status_code=400,
-                detail="Inventory type must be retailer or emergency",
-            )
+        payload = _validate_generator_payload(request_data, conn)
+        capacity_kva = payload["capacity_kva"]
+        type_raw = payload["type"]
+        identification_raw = payload["identification"]
+        notes_raw = payload["notes"]
+        status_raw = payload["status"]
+        inventory_type_raw = payload["inventory_type"]
+        rental_vendor_id_raw = payload["rental_vendor_id"]
+        rental_vendor_name = payload["rental_vendor_name"]
 
         def normalize_token(value: str) -> str:
             return re.sub(r"[^A-Za-z0-9]+", "", value.upper())
@@ -2529,6 +2656,8 @@ async def api_create_generator(
             status=status_raw,
             notes=notes_raw,
             inventory_type=inventory_type_raw,
+            rental_vendor_id=rental_vendor_id_raw,
+            rental_vendor_name=rental_vendor_name,
         )
         gen_repo.save(generator)
         logger.info(f"Generator created | context={{'generator_id': '{generator_id}'}}")
@@ -2536,6 +2665,8 @@ async def api_create_generator(
             "success": True,
             "generator_id": generator_id,
             "inventory_type": inventory_type_raw,
+            "rental_vendor_id": rental_vendor_id_raw,
+            "rental_vendor_name": rental_vendor_name,
             "message": f"Generator {generator_id} created successfully"
         }
     except HTTPException:
@@ -2543,6 +2674,57 @@ async def api_create_generator(
     except Exception as e:
         logger.error(f"Error creating generator: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while creating the generator")
+
+
+@app.patch("/api/generators/{generator_id}")
+async def api_update_generator(
+    generator_id: str,
+    request_data: UpdateGeneratorRequest,
+    _: Any = Depends(require_capability(CAPABILITY_GENERATOR_MANAGEMENT)),
+    conn: sqlite3.Connection = Depends(get_db)
+):
+    """Update an existing generator."""
+    try:
+        gen_repo = GeneratorRepository(conn)
+        existing_generator = gen_repo.get_by_id(generator_id)
+        if not existing_generator:
+            raise HTTPException(status_code=404, detail="Generator not found")
+
+        payload = _validate_generator_payload(request_data, conn)
+
+        updated_generator = Generator(
+            generator_id=existing_generator.generator_id,
+            capacity_kva=payload["capacity_kva"],
+            identification=payload["identification"],
+            type=payload["type"],
+            status=payload["status"],
+            notes=payload["notes"],
+            inventory_type=payload["inventory_type"],
+            rental_vendor_id=payload["rental_vendor_id"],
+            rental_vendor_name=payload["rental_vendor_name"],
+        )
+        gen_repo.save(updated_generator)
+        logger.info(
+            "Generator updated | context=%s",
+            {
+                "generator_id": generator_id,
+                "inventory_type": payload["inventory_type"],
+                "rental_vendor_id": payload["rental_vendor_id"],
+            },
+        )
+        return {
+            "success": True,
+            "generator_id": generator_id,
+            "inventory_type": payload["inventory_type"],
+            "rental_vendor_id": payload["rental_vendor_id"],
+            "rental_vendor_name": payload["rental_vendor_name"],
+            "message": f"Generator {generator_id} updated successfully",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating generator: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An error occurred while updating the generator")
 
 
 def _serialize_vendor_directory_entry(

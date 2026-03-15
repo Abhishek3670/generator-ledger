@@ -14,6 +14,7 @@ from config import (
     GEN_STATUS_INACTIVE,
     GEN_STATUS_MAINTENANCE,
     GEN_INVENTORY_RETAILER,
+    GEN_INVENTORY_PERMANENT,
     GEN_INVENTORY_EMERGENCY,
 )
 
@@ -35,6 +36,7 @@ class GeneratorStatus(Enum):
 class GeneratorInventoryType(Enum):
     """Generator inventory grouping for operational fallback stock."""
     RETAILER = GEN_INVENTORY_RETAILER
+    PERMANENT = GEN_INVENTORY_PERMANENT
     EMERGENCY = GEN_INVENTORY_EMERGENCY
 
 
@@ -57,6 +59,8 @@ class Generator:
     status: str = GeneratorStatus.ACTIVE.value
     notes: str = ""
     inventory_type: str = GeneratorInventoryType.RETAILER.value
+    rental_vendor_id: str = ""
+    rental_vendor_name: str = ""
 
 
 @dataclass

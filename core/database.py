@@ -11,6 +11,7 @@ from config import (
     GEN_STATUS_ACTIVE,
     OWNER_USERNAME,
     GEN_INVENTORY_RETAILER,
+    GEN_INVENTORY_PERMANENT,
 )
 from .observability import connect_sqlite
 
@@ -59,7 +60,8 @@ class DatabaseManager:
                 type TEXT,
                 status TEXT DEFAULT '{GEN_STATUS_ACTIVE}',
                 notes TEXT,
-                inventory_type TEXT DEFAULT '{GEN_INVENTORY_RETAILER}'
+                inventory_type TEXT DEFAULT '{GEN_INVENTORY_RETAILER}',
+                rental_vendor_id TEXT
             );
             
             CREATE TABLE IF NOT EXISTS vendors (
@@ -211,10 +213,39 @@ class DatabaseManager:
                 (GEN_INVENTORY_RETAILER,),
             )
 
+            if "rental_vendor_id" not in generator_cols:
+                cur.execute(
+                    "ALTER TABLE generators ADD COLUMN rental_vendor_id TEXT"
+                )
+
+            cur.execute(
+                """
+                UPDATE generators
+                SET rental_vendor_id = NULL
+                WHERE TRIM(COALESCE(rental_vendor_id, '')) = ''
+                """
+            )
+
+            cur.execute(
+                """
+                UPDATE generators
+                SET rental_vendor_id = NULL
+                WHERE inventory_type <> ?
+                """,
+                (GEN_INVENTORY_PERMANENT,),
+            )
+
             cur.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_generators_inventory_type
                 ON generators(inventory_type, generator_id)
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_generators_inventory_rental_vendor
+                ON generators(inventory_type, rental_vendor_id, generator_id)
                 """
             )
 

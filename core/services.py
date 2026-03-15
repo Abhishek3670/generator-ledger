@@ -9,7 +9,7 @@ import logging
 from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime
 
-from config import GEN_INVENTORY_RETAILER, GEN_INVENTORY_EMERGENCY
+from config import GEN_INVENTORY_RETAILER, GEN_INVENTORY_PERMANENT, GEN_INVENTORY_EMERGENCY
 
 from .models import (
     Generator, Vendor, Booking, BookingItem, BookingHistory,
@@ -160,6 +160,11 @@ class AvailabilityChecker:
         
         available = []
         for gen in candidates:
+            if (
+                normalized_inventory_type is None
+                and normalize_generator_inventory_type(gen.inventory_type) == GEN_INVENTORY_PERMANENT
+            ):
+                continue
             is_avail, _ = self.is_available(gen.generator_id, start_dt, end_dt)
             if is_avail:
                 available.append(gen)
@@ -429,7 +434,7 @@ class BookingService:
             else:
                 # Validate generator exists
                 try:
-                    ensure_generator(
+                    generator = ensure_generator(
                         self.generator_repo,
                         generator_id,
                         message=f"Item {idx + 1}: Generator '{generator_id}' not found"
@@ -437,6 +442,15 @@ class BookingService:
                 except ValueError:
                     self.logger.warning(f"Item validation failed | context={{'generator_id': '{generator_id}', 'reason': 'not found'}}")
                     raise
+
+                if normalize_generator_inventory_type(generator.inventory_type) == GEN_INVENTORY_PERMANENT:
+                    self.logger.warning(
+                        "Booking request rejected for permanent generator | context="
+                        f"{{'generator_id': '{generator_id}'}}"
+                    )
+                    raise RuntimeError(
+                        f"Item {idx + 1}: Generator {generator_id} is a Permanent Genset and cannot be booked."
+                    )
                 
                 is_avail, conflict = self.availability.is_available(
                     generator_id, start_dt, end_dt
@@ -723,6 +737,7 @@ class DataLoader:
                             inventory_type=normalize_generator_inventory_type(
                                 str(row.get("Inventory_Type", ""))
                             ),
+                            rental_vendor_id=str(row.get("Rental_Vendor_ID", "")) or "",
                         )
                         self.generator_repo.save(generator)
                         loaded_count += 1

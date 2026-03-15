@@ -9,6 +9,7 @@ from typing import Optional, List, Dict, Any
 from config import (
     STATUS_CONFIRMED,
     GEN_INVENTORY_RETAILER,
+    GEN_INVENTORY_PERMANENT,
     GEN_INVENTORY_EMERGENCY,
 )
 
@@ -30,7 +31,7 @@ class GeneratorRepository:
     """Repository for generator data access."""
 
     GENERATOR_COLUMNS = (
-        "generator_id, capacity_kva, identification, type, status, notes, inventory_type"
+        "generator_id, capacity_kva, identification, type, status, notes, inventory_type, rental_vendor_id"
     )
     
     def __init__(self, conn: sqlite3.Connection):
@@ -46,6 +47,7 @@ class GeneratorRepository:
             status=row[4] or GeneratorStatus.ACTIVE.value,
             notes=row[5] or "",
             inventory_type=normalize_generator_inventory_type(row[6] if len(row) > 6 else None),
+            rental_vendor_id=row[7] or "",
         )
     
     def get_by_id(self, generator_id: str) -> Optional[Generator]:
@@ -79,8 +81,9 @@ class GeneratorRepository:
         query.append(
             "ORDER BY CASE inventory_type "
             f"WHEN '{GEN_INVENTORY_RETAILER}' THEN 0 "
-            f"WHEN '{GEN_INVENTORY_EMERGENCY}' THEN 1 "
-            "ELSE 2 END, generator_id"
+            f"WHEN '{GEN_INVENTORY_PERMANENT}' THEN 1 "
+            f"WHEN '{GEN_INVENTORY_EMERGENCY}' THEN 2 "
+            "ELSE 3 END, generator_id"
         )
 
         cur.execute(" ".join(query), tuple(params))
@@ -89,10 +92,16 @@ class GeneratorRepository:
     def save(self, generator: Generator) -> None:
         try:
             cur = self.conn.cursor()
+            normalized_inventory_type = normalize_generator_inventory_type(generator.inventory_type)
+            rental_vendor_id = (
+                (generator.rental_vendor_id or "").strip()
+                if normalized_inventory_type == GEN_INVENTORY_PERMANENT
+                else ""
+            )
             cur.execute(
                 """INSERT OR REPLACE INTO generators
-                (generator_id, capacity_kva, identification, type, status, notes, inventory_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (generator_id, capacity_kva, identification, type, status, notes, inventory_type, rental_vendor_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     generator.generator_id,
                     generator.capacity_kva,
@@ -100,7 +109,8 @@ class GeneratorRepository:
                     generator.type,
                     generator.status,
                     generator.notes,
-                    normalize_generator_inventory_type(generator.inventory_type),
+                    normalized_inventory_type,
+                    rental_vendor_id or None,
                 ),
             )
             self.conn.commit()
@@ -118,8 +128,9 @@ class GeneratorRepository:
         query.append(
             "ORDER BY CASE inventory_type "
             f"WHEN '{GEN_INVENTORY_RETAILER}' THEN 0 "
-            f"WHEN '{GEN_INVENTORY_EMERGENCY}' THEN 1 "
-            "ELSE 2 END, generator_id"
+            f"WHEN '{GEN_INVENTORY_PERMANENT}' THEN 1 "
+            f"WHEN '{GEN_INVENTORY_EMERGENCY}' THEN 2 "
+            "ELSE 3 END, generator_id"
         )
         cur.execute(" ".join(query), tuple(params))
         return [self._row_to_model(row) for row in cur.fetchall()]

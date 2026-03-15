@@ -1,15 +1,16 @@
 {% extends "base.html" %}
 
-{% macro generator_section(section_id, title, description, generators, booking_status, selected_date, inventory_labels) %}
+{% macro generator_section(section_id, title, description, generators, booking_status, selected_date, column_label) %}
 {% set is_emergency = section_id == 'emergencyGenset' %}
-<section class="mt-8 rounded-3xl border bg-white p-5 shadow-sm lg:p-6 {% if is_emergency %}border-rose-200{% else %}border-slate-200{% endif %}" data-generator-section="{{ section_id }}">
+{% set is_permanent = section_id == 'permanentGenset' %}
+<section class="mt-8 rounded-3xl border bg-white p-5 shadow-sm lg:p-6 {% if is_emergency %}border-rose-200{% elif is_permanent %}border-amber-200{% else %}border-slate-200{% endif %}" data-generator-section="{{ section_id }}">
     <div class="flex flex-wrap items-center justify-between gap-4">
         <div>
             <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inventory Group</div>
-            <h2 class="mt-2 text-xl font-semibold {% if is_emergency %}text-rose-700{% else %}text-slate-900{% endif %}">{{ title }}</h2>
+            <h2 class="mt-2 text-xl font-semibold {% if is_emergency %}text-rose-700{% elif is_permanent %}text-amber-700{% else %}text-slate-900{% endif %}">{{ title }}</h2>
             <p class="mt-1 text-sm text-slate-500">{{ description }}</p>
         </div>
-        <div class="rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] {% if is_emergency %}border-rose-200 bg-rose-50 text-rose-700{% else %}border-slate-200 bg-slate-50 text-slate-500{% endif %}">
+        <div class="rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] {% if is_emergency %}border-rose-200 bg-rose-50 text-rose-700{% elif is_permanent %}border-amber-200 bg-amber-50 text-amber-700{% else %}border-slate-200 bg-slate-50 text-slate-500{% endif %}">
             {{ generators|length }} record{{ '' if generators|length == 1 else 's' }}
         </div>
     </div>
@@ -22,7 +23,7 @@
             id="{{ section_id }}Filter"
             data-table-body="{{ section_id }}Table"
             class="generator-filter-input mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
-            placeholder="Search by ID, Type, Status, or Booking"
+            placeholder="Search by ID, Type, Status, Rental Vendor, or Notes"
         >
     </div>
 
@@ -42,38 +43,54 @@
                         <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">Identification</th>
                         <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">Operational Status</th>
                         <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">
+                            {% if is_permanent %}
+                            <span>{{ column_label }}</span>
+                            {% else %}
                             <button type="button" class="inline-flex items-center gap-2" data-sort="booking" data-sort-section="{{ section_id }}">
-                                <span>Booking Status</span>
+                                <span>{{ column_label }}</span>
                                 <span class="text-xs text-slate-400" data-sort-indicator="booking" data-sort-section="{{ section_id }}"></span>
                             </button>
+                            {% endif %}
                         </th>
                         <th class="sticky top-0 z-10 bg-slate-50 px-6 py-4 text-left font-semibold">Notes</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100 text-slate-700" id="{{ section_id }}Table">
                     {% for gen in generators %}
+                    {% set booking_label = booking_status.get(gen.generator_id, 'Free') %}
+                    {% set op_status = gen.status or 'Inactive' %}
                     <tr
                         class="cursor-pointer transition hover:bg-slate-50"
                         data-generator-id="{{ gen.generator_id }}"
                         data-capacity="{{ gen.capacity_kva }}"
                         data-type="{{ gen.type or '' }}"
                         data-identification="{{ gen.identification or '' }}"
-                        data-booking="{{ booking_status.get(gen.generator_id, '') if selected_date else '' }}"
+                        data-operational-status="{{ gen.status or 'Inactive' }}"
+                        data-booking="{{ booking_label if selected_date and not is_permanent else '' }}"
                         data-inventory-type="{{ gen.inventory_type }}"
+                        data-notes="{{ gen.notes or '' }}"
+                        data-rental-vendor-id="{{ gen.rental_vendor_id or '' }}"
+                        data-rental-vendor-name="{{ gen.rental_vendor_name or '' }}"
                     >
                         <td class="px-6 py-4 font-semibold text-slate-900">{{ gen.generator_id }}</td>
                         <td class="px-6 py-4">{{ gen.capacity_kva }}</td>
                         <td class="px-6 py-4">{{ gen.type or '-' }}</td>
                         <td class="px-6 py-4">{{ gen.identification or '-' }}</td>
                         <td class="px-6 py-4">
-                            {% set op_status = 'Active' if gen.status == 'Active' else 'Inactive' %}
-                            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold {% if op_status == 'Active' %}bg-emerald-100 text-emerald-700{% else %}bg-rose-100 text-rose-700{% endif %}">
+                            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold {% if op_status == 'Active' %}bg-emerald-100 text-emerald-700{% elif op_status == 'Maintenance' %}bg-amber-100 text-amber-700{% else %}bg-rose-100 text-rose-700{% endif %}">
                                 {{ op_status }}
                             </span>
                         </td>
                         <td class="px-6 py-4">
-                            {% if selected_date %}
-                                {% set booking_label = booking_status.get(gen.generator_id, 'Free') %}
+                            {% if is_permanent %}
+                                {% if gen.rental_vendor_name %}
+                                <span class="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                                    {{ gen.rental_vendor_name }}
+                                </span>
+                                {% else %}
+                                <span class="text-xs text-slate-400">&mdash;</span>
+                                {% endif %}
+                            {% elif selected_date %}
                                 <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold {% if booking_label == 'Booked' %}bg-amber-100 text-amber-700{% else %}bg-emerald-100 text-emerald-700{% endif %}">
                                     {{ booking_label }}
                                 </span>
@@ -117,7 +134,7 @@
             <div>
                 <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inventory</div>
                 <h1 class="mt-2 text-2xl font-semibold text-slate-900">Generators</h1>
-                <p class="mt-1 text-sm text-slate-500">Track retailer and emergency genset inventory, capacity, availability, and identifiers.</p>
+                <p class="mt-1 text-sm text-slate-500">Track retailer, permanent, and emergency genset inventory, assignments, availability, and identifiers.</p>
             </div>
             {% if permissions.get('generator_management') %}
             <button id="openAddGenerator" type="button" class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">
@@ -141,7 +158,7 @@
                     All
                 </button>
             </div>
-            <p class="mt-3 text-xs text-slate-500">Booking status shows &mdash; until a date is selected. Retailer stock is preferred first; emergency stock stays available as warehouse backup.</p>
+            <p class="mt-3 text-xs text-slate-500">Booking status shows &mdash; until a date is selected. Permanent Gensets stay assigned to Rental Vendors and are excluded from booking stock.</p>
         </div>
 
         {{ generator_section(
@@ -151,17 +168,27 @@
             retailer_generators or [],
             booking_status,
             selected_date,
-            inventory_labels
+            "Booking Status"
+        ) }}
+
+        {{ generator_section(
+            "permanentGenset",
+            "Permanent Genset",
+            "Gensets permanently parked at Rental Vendor properties such as marriage halls and guest houses.",
+            permanent_generators or [],
+            booking_status,
+            selected_date,
+            "Rental Vendor"
         ) }}
 
         {{ generator_section(
             "emergencyGenset",
             "Emergency Genset",
-            "Backup gensets kept ready when any genset fails or retailer's request",
+            "Backup gensets kept ready when any genset fails or a retailer requests emergency coverage.",
             emergency_generators or [],
             booking_status,
             selected_date,
-            inventory_labels
+            "Booking Status"
         ) }}
     </div>
 </div>
@@ -171,19 +198,21 @@
     <div class="w-full max-w-2xl rounded-2xl bg-white shadow-xl">
         <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
             <div>
-                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inventory</div>
-                <div class="mt-1 text-lg font-semibold text-slate-900">Add New Genset</div>
+                <div id="generatorFormModeLabel" class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inventory</div>
+                <div id="generatorFormHeading" class="mt-1 text-lg font-semibold text-slate-900">Add New Genset</div>
             </div>
             <button id="closeGeneratorOverlay" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
                 Close
             </button>
         </div>
         <form id="generatorForm" class="space-y-4 px-6 py-5">
+            <input type="hidden" id="generatorFormGeneratorId" value="">
             <div class="grid gap-4 sm:grid-cols-2">
                 <div>
                     <label for="genInventoryType" class="text-sm font-semibold text-slate-700">Inventory Group <span class="text-rose-500">*</span></label>
                     <select id="genInventoryType" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
                         <option value="retailer">Retailer Genset</option>
+                        <option value="permanent">Permanent Genset</option>
                         <option value="emergency">Emergency Genset</option>
                     </select>
                 </div>
@@ -198,6 +227,13 @@
                     </div>
                     <input type="hidden" id="genCapacity" value="">
                 </div>
+            </div>
+            <div id="rentalVendorFieldWrapper" class="hidden">
+                <label for="genRentalVendor" class="text-sm font-semibold text-slate-700">Rental Vendor <span class="text-rose-500">*</span></label>
+                <select id="genRentalVendor" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
+                    <option value="">Select a Rental Vendor</option>
+                </select>
+                <p class="mt-2 text-xs text-slate-500">Permanent Gensets must be assigned to a Rental Vendor property.</p>
             </div>
             <div class="grid gap-4 sm:grid-cols-2">
                 <div>
@@ -241,7 +277,9 @@
             </div>
             <div class="flex flex-wrap justify-end gap-3 pt-2">
                 <button type="button" id="cancelGeneratorForm" class="rounded-full border border-slate-200 px-5 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">Cancel</button>
-                <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800">Save Genset</button>
+                <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800">
+                    <span id="generatorSubmitLabel">Save Genset</span>
+                </button>
             </div>
         </form>
     </div>
@@ -256,9 +294,16 @@
                 <div id="detailGeneratorTitle" class="mt-1 text-lg font-semibold text-slate-900"></div>
                 <div id="detailGeneratorMeta" class="mt-1 text-xs text-slate-500"></div>
             </div>
-            <button id="closeGeneratorDetail" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
-                Close
-            </button>
+            <div class="flex items-center gap-2">
+                {% if permissions.get('generator_management') %}
+                <button id="openEditGenerator" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                    Edit Genset
+                </button>
+                {% endif %}
+                <button id="closeGeneratorDetail" type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+                    Close
+                </button>
+            </div>
         </div>
         <div class="grid gap-6 px-6 py-5 lg:grid-cols-[1.2fr_0.8fr]">
             <div>
@@ -287,7 +332,7 @@
                         <input id="generatorBookingRemarks" type="text" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200">
                     </div>
                     <div class="flex justify-end pt-1">
-                        <button type="submit" class="rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800">Create Booking</button>
+                        <button type="submit" id="createBookingSubmit" class="rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800">Create Booking</button>
                     </div>
                 </form>
                 {% else %}
@@ -340,6 +385,13 @@ const openGeneratorOverlay = document.getElementById('openAddGenerator');
 const closeGeneratorOverlay = document.getElementById('closeGeneratorOverlay');
 const cancelGeneratorForm = document.getElementById('cancelGeneratorForm');
 const generatorForm = document.getElementById('generatorForm');
+const generatorFormModeLabel = document.getElementById('generatorFormModeLabel');
+const generatorFormHeading = document.getElementById('generatorFormHeading');
+const generatorFormGeneratorId = document.getElementById('generatorFormGeneratorId');
+const generatorSubmitLabel = document.getElementById('generatorSubmitLabel');
+const genInventoryType = document.getElementById('genInventoryType');
+const genRentalVendor = document.getElementById('genRentalVendor');
+const rentalVendorFieldWrapper = document.getElementById('rentalVendorFieldWrapper');
 const capacityButtons = document.querySelectorAll('#generatorCapacityButtons .capacity-btn');
 const capacitySelectedClasses = ['border-slate-900', 'bg-slate-900', 'text-white'];
 const capacityUnselectedClasses = ['border-slate-200', 'bg-white', 'text-slate-700'];
@@ -347,6 +399,25 @@ const statusDisplay = document.getElementById('genStatusDisplay');
 const statusDropdown = document.getElementById('genStatusDropdown');
 const statusHiddenInput = document.getElementById('genStatus');
 const statusOptions = document.querySelectorAll('#genStatusDropdownList .status-option');
+
+const generatorDetailOverlay = document.getElementById('generatorDetailOverlay');
+const closeGeneratorDetail = document.getElementById('closeGeneratorDetail');
+const openEditGenerator = document.getElementById('openEditGenerator');
+const detailGeneratorTitle = document.getElementById('detailGeneratorTitle');
+const detailGeneratorMeta = document.getElementById('detailGeneratorMeta');
+const generatorBookingsContent = document.getElementById('generatorBookingsContent');
+const createBookingPanel = document.getElementById('createBookingPanel');
+const createBookingHint = document.getElementById('createBookingHint');
+const createBookingForm = document.getElementById('createBookingForm');
+const createBookingSubmit = document.getElementById('createBookingSubmit');
+const generatorVendorSelect = document.getElementById('generatorVendorSelect');
+const generatorBookingDate = document.getElementById('generatorBookingDate');
+const generatorBookingRemarks = document.getElementById('generatorBookingRemarks');
+
+let cachedVendors = null;
+let cachedRentalVendors = null;
+let activeGeneratorId = null;
+let activeGeneratorData = null;
 
 function hideGeneratorOverlay() {
     if (!generatorOverlay) return;
@@ -360,6 +431,18 @@ function showGeneratorOverlay() {
     generatorOverlay.classList.add('flex');
 }
 
+function showGeneratorDetailOverlay() {
+    if (!generatorDetailOverlay) return;
+    generatorDetailOverlay.classList.remove('hidden');
+    generatorDetailOverlay.classList.add('flex');
+}
+
+function hideGeneratorDetailOverlay() {
+    if (!generatorDetailOverlay) return;
+    generatorDetailOverlay.classList.add('hidden');
+    generatorDetailOverlay.classList.remove('flex');
+}
+
 function hideStatusDropdown() {
     if (!statusDropdown) return;
     statusDropdown.classList.add('hidden');
@@ -370,28 +453,6 @@ function setStatusValue(value) {
     if (statusHiddenInput) statusHiddenInput.value = value;
 }
 
-statusDisplay?.addEventListener('click', function(event) {
-    event.stopPropagation();
-    if (!statusDropdown) return;
-    statusDropdown.classList.toggle('hidden');
-});
-
-statusOptions.forEach(option => {
-    option.addEventListener('click', function(event) {
-        event.preventDefault();
-        const value = option.getAttribute('data-status') || 'Active';
-        setStatusValue(value);
-        hideStatusDropdown();
-    });
-});
-
-document.addEventListener('click', function(event) {
-    if (!statusDropdown || !statusDisplay) return;
-    if (!statusDropdown.contains(event.target) && event.target !== statusDisplay) {
-        hideStatusDropdown();
-    }
-});
-
 function setCapacityButtonState(button, selected) {
     button.classList.remove(...capacitySelectedClasses, ...capacityUnselectedClasses);
     if (selected) {
@@ -401,19 +462,291 @@ function setCapacityButtonState(button, selected) {
     }
 }
 
-capacityButtons.forEach(button => {
-    setCapacityButtonState(button, false);
-    button.addEventListener('click', function(event) {
-        event.preventDefault();
-        capacityButtons.forEach(btn => setCapacityButtonState(btn, false));
-        setCapacityButtonState(button, true);
-        const capacityValue = button.getAttribute('data-capacity') || '';
-        const capacityInput = document.getElementById('genCapacity');
-        if (capacityInput) {
-            capacityInput.value = capacityValue;
-        }
+function setCapacityValue(value) {
+    const normalizedValue = String(value || '');
+    capacityButtons.forEach(button => {
+        setCapacityButtonState(button, button.getAttribute('data-capacity') === normalizedValue);
     });
-});
+    const capacityInput = document.getElementById('genCapacity');
+    if (capacityInput) {
+        capacityInput.value = normalizedValue;
+    }
+}
+
+function resetGeneratorForm() {
+    if (!generatorForm) return;
+    generatorForm.reset();
+    if (generatorFormModeLabel) generatorFormModeLabel.textContent = 'Inventory';
+    if (generatorFormHeading) generatorFormHeading.textContent = 'Add New Genset';
+    if (generatorSubmitLabel) generatorSubmitLabel.textContent = 'Save Genset';
+    if (generatorFormGeneratorId) generatorFormGeneratorId.value = '';
+    if (genInventoryType) genInventoryType.value = 'retailer';
+    if (genRentalVendor) genRentalVendor.value = '';
+    setCapacityValue('');
+    setStatusValue('Active');
+    toggleRentalVendorField();
+}
+
+function toggleRentalVendorField() {
+    const isPermanent = genInventoryType?.value === 'permanent';
+    if (!rentalVendorFieldWrapper || !genRentalVendor) return;
+    rentalVendorFieldWrapper.classList.toggle('hidden', !isPermanent);
+    genRentalVendor.required = Boolean(isPermanent);
+    genRentalVendor.disabled = !isPermanent;
+    if (!isPermanent) {
+        genRentalVendor.value = '';
+    }
+}
+
+async function loadVendors() {
+    if (cachedVendors) return cachedVendors;
+    const response = await fetch('/api/vendors');
+    if (response.status === 401) {
+        window.location.href = '/login';
+        return [];
+    }
+    const data = await response.json();
+    cachedVendors = data || [];
+    return cachedVendors;
+}
+
+async function loadRentalVendors() {
+    if (cachedRentalVendors) return cachedRentalVendors;
+    const response = await fetch('/api/rental-vendors');
+    if (response.status === 401) {
+        window.location.href = '/login';
+        return [];
+    }
+    const data = await response.json();
+    cachedRentalVendors = data || [];
+    return cachedRentalVendors;
+}
+
+function renderVendorOptions(vendors) {
+    if (!generatorVendorSelect) return;
+    generatorVendorSelect.innerHTML = '<option value="">Select a vendor</option>';
+    vendors.forEach(vendor => {
+        const option = document.createElement('option');
+        option.value = vendor.id;
+        option.textContent = `${vendor.name} (${vendor.id})`;
+        generatorVendorSelect.appendChild(option);
+    });
+}
+
+function renderRentalVendorOptions(vendors, selectedId = '') {
+    if (!genRentalVendor) return;
+    genRentalVendor.innerHTML = '<option value="">Select a Rental Vendor</option>';
+    vendors.forEach(vendor => {
+        const option = document.createElement('option');
+        option.value = vendor.rental_vendor_id;
+        option.textContent = `${vendor.name} (${vendor.rental_vendor_id})`;
+        option.selected = vendor.rental_vendor_id === selectedId;
+        genRentalVendor.appendChild(option);
+    });
+}
+
+async function ensureRentalVendorOptions(selectedId = '') {
+    if (!genRentalVendor) return;
+    const vendors = await loadRentalVendors();
+    renderRentalVendorOptions(vendors, selectedId);
+    toggleRentalVendorField();
+}
+
+function setCreateBookingFormEnabled(enabled) {
+    if (generatorBookingDate) generatorBookingDate.disabled = !enabled;
+    if (generatorVendorSelect) generatorVendorSelect.disabled = !enabled;
+    if (createBookingSubmit) createBookingSubmit.disabled = !enabled;
+    createBookingPanel?.classList.toggle('opacity-60', !enabled);
+}
+
+function configureCreateBookingPanel(status, selectedDate, inventoryType, rentalVendorName) {
+    if (!createBookingPanel || !createBookingHint || !generatorBookingDate) return;
+
+    if (inventoryType === 'permanent') {
+        const propertyLabel = rentalVendorName || 'the assigned property';
+        createBookingHint.textContent = `Permanent Genset is assigned to ${propertyLabel} and is not available for bookings.`;
+        generatorBookingDate.value = '';
+        setCreateBookingFormEnabled(false);
+        return;
+    }
+
+    if (!selectedDate) {
+        createBookingHint.textContent = 'Select a booked date to create a booking for this generator.';
+        generatorBookingDate.value = '';
+        setCreateBookingFormEnabled(false);
+        return;
+    }
+
+    generatorBookingDate.value = selectedDate;
+    const isFree = status === 'Free';
+    setCreateBookingFormEnabled(isFree);
+
+    if (status === 'Free') {
+        createBookingHint.textContent = 'Generator is free on this date. Create a booking below.';
+    } else if (status === 'Booked') {
+        createBookingHint.textContent = 'This generator is already booked on the selected date.';
+    } else {
+        createBookingHint.textContent = 'Select a booked date to determine availability.';
+    }
+}
+
+function renderBookingsList(bookings, selectedDate, inventoryType, rentalVendorName) {
+    if (!generatorBookingsContent) return;
+    if (!bookings || bookings.length === 0) {
+        const emptyMessage = inventoryType === 'permanent'
+            ? `No booking history found for this Permanent Genset${rentalVendorName ? ` at ${rentalVendorName}` : ''}.`
+            : 'No bookings found for this generator.';
+        generatorBookingsContent.innerHTML = `<div class="text-sm text-slate-500">${emptyMessage}</div>`;
+        return;
+    }
+
+    const rows = bookings.map(item => {
+        const dateLabel = item.start_dt ? item.start_dt.split(' ')[0] : '-';
+        const statusLabel = item.item_status || item.booking_status || '-';
+        const isSelectedDate = selectedDate && dateLabel === selectedDate;
+        return `
+            <tr class="border-b border-slate-100 ${isSelectedDate ? 'bg-amber-50' : ''}">
+                <td class="py-2 pr-3 text-sm font-semibold text-slate-900">${item.booking_id}</td>
+                <td class="py-2 pr-3 text-sm text-slate-700">${item.vendor_name || item.vendor_id || '-'}</td>
+                <td class="py-2 pr-3 text-sm text-slate-700">${dateLabel}</td>
+                <td class="py-2 text-sm text-slate-700">${statusLabel}</td>
+            </tr>
+        `;
+    }).join('');
+
+    const hint = selectedDate ? `<div class="mb-3 text-xs text-slate-500">Bookings on ${selectedDate} are highlighted.</div>` : '';
+    generatorBookingsContent.innerHTML = `
+        ${hint}
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-left text-sm">
+                <thead class="text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                        <th class="py-2 pr-3 font-semibold">Booking ID</th>
+                        <th class="py-2 pr-3 font-semibold">Vendor</th>
+                        <th class="py-2 pr-3 font-semibold">Date</th>
+                        <th class="py-2 font-semibold">Status</th>
+                    </tr>
+                </thead>
+                <tbody class="text-slate-700">
+                    ${rows}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+async function fetchGeneratorBookings(generatorId) {
+    const response = await fetch(`/api/generators/${encodeURIComponent(generatorId)}/bookings`);
+    if (response.status === 401) {
+        window.location.href = '/login';
+        return null;
+    }
+    if (!response.ok) {
+        return null;
+    }
+    return await response.json();
+}
+
+function buildGeneratorData(row) {
+    return {
+        generatorId: row.dataset.generatorId || '',
+        capacity: row.dataset.capacity || '',
+        type: row.dataset.type || '',
+        identification: row.dataset.identification || '',
+        status: row.dataset.operationalStatus || 'Active',
+        notes: row.dataset.notes || '',
+        inventoryType: row.dataset.inventoryType || 'retailer',
+        bookingStatus: row.dataset.booking || '',
+        rentalVendorId: row.dataset.rentalVendorId || '',
+        rentalVendorName: row.dataset.rentalVendorName || '',
+    };
+}
+
+async function openCreateGeneratorForm() {
+    resetGeneratorForm();
+    await ensureRentalVendorOptions();
+    showGeneratorOverlay();
+}
+
+async function openEditGeneratorForm(generatorData) {
+    if (!generatorForm) return;
+    if (generatorFormModeLabel) generatorFormModeLabel.textContent = 'Inventory';
+    if (generatorFormHeading) generatorFormHeading.textContent = `Edit ${generatorData.generatorId}`;
+    if (generatorSubmitLabel) generatorSubmitLabel.textContent = 'Update Genset';
+    if (generatorFormGeneratorId) generatorFormGeneratorId.value = generatorData.generatorId;
+    if (genInventoryType) genInventoryType.value = generatorData.inventoryType || 'retailer';
+    await ensureRentalVendorOptions(generatorData.rentalVendorId || '');
+    setCapacityValue(generatorData.capacity || '');
+    const typeInput = document.getElementById('genType');
+    const identificationInput = document.getElementById('genIdentification');
+    const notesInput = document.getElementById('genNotes');
+    if (typeInput) typeInput.value = generatorData.type || '';
+    if (identificationInput) identificationInput.value = generatorData.identification || '';
+    if (notesInput) notesInput.value = generatorData.notes || '';
+    setStatusValue(generatorData.status || 'Active');
+    if (genRentalVendor) genRentalVendor.value = generatorData.rentalVendorId || '';
+    toggleRentalVendorField();
+    showGeneratorOverlay();
+}
+
+async function handleRowClick(row) {
+    const generatorData = buildGeneratorData(row);
+    if (!generatorData.generatorId) return;
+
+    activeGeneratorId = generatorData.generatorId;
+    activeGeneratorData = generatorData;
+    const selectedDate = bookingDateFilter?.value || '';
+
+    if (detailGeneratorTitle) {
+        detailGeneratorTitle.textContent = generatorData.generatorId;
+    }
+    if (detailGeneratorMeta) {
+        const metaParts = [];
+        if (inventoryLabels[generatorData.inventoryType]) metaParts.push(inventoryLabels[generatorData.inventoryType]);
+        if (generatorData.capacity) metaParts.push(`${generatorData.capacity} kVA`);
+        if (generatorData.type) metaParts.push(generatorData.type);
+        if (generatorData.identification) metaParts.push(generatorData.identification);
+        if (generatorData.inventoryType === 'permanent' && generatorData.rentalVendorName) {
+            metaParts.push(`Assigned to ${generatorData.rentalVendorName}`);
+        }
+        detailGeneratorMeta.textContent = metaParts.join(' • ') || '—';
+    }
+
+    showGeneratorDetailOverlay();
+    if (generatorBookingsContent) {
+        generatorBookingsContent.textContent = 'Loading bookings...';
+    }
+
+    configureCreateBookingPanel(
+        generatorData.bookingStatus,
+        selectedDate,
+        generatorData.inventoryType,
+        generatorData.rentalVendorName
+    );
+
+    try {
+        const [bookingData, vendors] = await Promise.all([
+            fetchGeneratorBookings(generatorData.generatorId),
+            loadVendors()
+        ]);
+        if (vendors) renderVendorOptions(vendors);
+
+        if (bookingData && bookingData.bookings) {
+            renderBookingsList(
+                bookingData.bookings,
+                selectedDate,
+                generatorData.inventoryType,
+                generatorData.rentalVendorName
+            );
+        } else {
+            renderBookingsList([], selectedDate, generatorData.inventoryType, generatorData.rentalVendorName);
+        }
+    } catch (error) {
+        if (generatorBookingsContent) {
+            generatorBookingsContent.textContent = 'Unable to load bookings.';
+        }
+    }
+}
 
 function initSectionSorting(sectionId) {
     const tableBody = document.getElementById(`${sectionId}Table`);
@@ -421,7 +754,7 @@ function initSectionSorting(sectionId) {
 
     const sortState = {
         capacity: 'none',
-        booking: 'none'
+        booking: 'none',
     };
     const sortStorageKey = `gensetSortKey:${sectionId}`;
     const sortStorageDir = `gensetSortDir:${sectionId}`;
@@ -519,26 +852,49 @@ function initSectionSorting(sectionId) {
     }
 }
 
-['retailerGenset', 'emergencyGenset'].forEach(initSectionSorting);
+statusDisplay?.addEventListener('click', function(event) {
+    event.stopPropagation();
+    if (!statusDropdown) return;
+    statusDropdown.classList.toggle('hidden');
+});
 
-const generatorDetailOverlay = document.getElementById('generatorDetailOverlay');
-const closeGeneratorDetail = document.getElementById('closeGeneratorDetail');
-const detailGeneratorTitle = document.getElementById('detailGeneratorTitle');
-const detailGeneratorMeta = document.getElementById('detailGeneratorMeta');
-const generatorBookingsContent = document.getElementById('generatorBookingsContent');
-const createBookingPanel = document.getElementById('createBookingPanel');
-const createBookingHint = document.getElementById('createBookingHint');
-const createBookingForm = document.getElementById('createBookingForm');
-const generatorVendorSelect = document.getElementById('generatorVendorSelect');
-const generatorBookingDate = document.getElementById('generatorBookingDate');
-const generatorBookingRemarks = document.getElementById('generatorBookingRemarks');
+statusOptions.forEach(option => {
+    option.addEventListener('click', function(event) {
+        event.preventDefault();
+        const value = option.getAttribute('data-status') || 'Active';
+        setStatusValue(value);
+        hideStatusDropdown();
+    });
+});
 
-let cachedVendors = null;
-let activeGeneratorId = null;
+document.addEventListener('click', function(event) {
+    if (!statusDropdown || !statusDisplay) return;
+    if (!statusDropdown.contains(event.target) && event.target !== statusDisplay) {
+        hideStatusDropdown();
+    }
+});
 
-openGeneratorOverlay?.addEventListener('click', showGeneratorOverlay);
+capacityButtons.forEach(button => {
+    setCapacityButtonState(button, false);
+    button.addEventListener('click', function(event) {
+        event.preventDefault();
+        setCapacityValue(button.getAttribute('data-capacity') || '');
+    });
+});
+
+genInventoryType?.addEventListener('change', async function() {
+    if (genInventoryType?.value === 'permanent') {
+        await ensureRentalVendorOptions(genRentalVendor?.value || '');
+    }
+    toggleRentalVendorField();
+});
+
+openGeneratorOverlay?.addEventListener('click', function() {
+    openCreateGeneratorForm();
+});
 closeGeneratorOverlay?.addEventListener('click', hideGeneratorOverlay);
 cancelGeneratorForm?.addEventListener('click', hideGeneratorOverlay);
+closeGeneratorDetail?.addEventListener('click', hideGeneratorDetailOverlay);
 
 generatorOverlay?.addEventListener('click', function(event) {
     if (event.target === generatorOverlay) {
@@ -546,180 +902,18 @@ generatorOverlay?.addEventListener('click', function(event) {
     }
 });
 
-function showGeneratorDetailOverlay() {
-    if (!generatorDetailOverlay) return;
-    generatorDetailOverlay.classList.remove('hidden');
-    generatorDetailOverlay.classList.add('flex');
-}
-
-function hideGeneratorDetailOverlay() {
-    if (!generatorDetailOverlay) return;
-    generatorDetailOverlay.classList.add('hidden');
-    generatorDetailOverlay.classList.remove('flex');
-}
-
-closeGeneratorDetail?.addEventListener('click', hideGeneratorDetailOverlay);
-
 generatorDetailOverlay?.addEventListener('click', function(event) {
     if (event.target === generatorDetailOverlay) {
         hideGeneratorDetailOverlay();
     }
 });
 
-async function loadVendors() {
-    if (cachedVendors) return cachedVendors;
-    const response = await fetch('/api/vendors');
-    if (response.status === 401) {
-        window.location.href = '/login';
-        return [];
-    }
-    const data = await response.json();
-    cachedVendors = data || [];
-    return cachedVendors;
-}
+openEditGenerator?.addEventListener('click', async function() {
+    if (!activeGeneratorData) return;
+    await openEditGeneratorForm(activeGeneratorData);
+});
 
-function renderVendorOptions(vendors) {
-    if (!generatorVendorSelect) return;
-    generatorVendorSelect.innerHTML = '<option value="">Select a vendor</option>';
-    vendors.forEach(vendor => {
-        const option = document.createElement('option');
-        option.value = vendor.id;
-        option.textContent = `${vendor.name} (${vendor.id})`;
-        generatorVendorSelect.appendChild(option);
-    });
-}
-
-function renderBookingsList(bookings, selectedDate) {
-    if (!generatorBookingsContent) return;
-    if (!bookings || bookings.length === 0) {
-        generatorBookingsContent.innerHTML = '<div class="text-sm text-slate-500">No bookings found for this generator.</div>';
-        return;
-    }
-
-    const rows = bookings.map(item => {
-        const dateLabel = item.start_dt ? item.start_dt.split(' ')[0] : '-';
-        const statusLabel = item.item_status || item.booking_status || '-';
-        const isSelectedDate = selectedDate && dateLabel === selectedDate;
-        return `
-            <tr class="border-b border-slate-100 ${isSelectedDate ? 'bg-amber-50' : ''}">
-                <td class="py-2 pr-3 text-sm font-semibold text-slate-900">${item.booking_id}</td>
-                <td class="py-2 pr-3 text-sm text-slate-700">${item.vendor_name || item.vendor_id || '-'}</td>
-                <td class="py-2 pr-3 text-sm text-slate-700">${dateLabel}</td>
-                <td class="py-2 text-sm text-slate-700">${statusLabel}</td>
-            </tr>
-        `;
-    }).join('');
-
-    const hint = selectedDate ? `<div class="mb-3 text-xs text-slate-500">Bookings on ${selectedDate} are highlighted.</div>` : '';
-    generatorBookingsContent.innerHTML = `
-        ${hint}
-        <div class="overflow-x-auto">
-            <table class="min-w-full text-left text-sm">
-                <thead class="text-xs uppercase tracking-wide text-slate-500">
-                    <tr>
-                        <th class="py-2 pr-3 font-semibold">Booking ID</th>
-                        <th class="py-2 pr-3 font-semibold">Vendor</th>
-                        <th class="py-2 pr-3 font-semibold">Date</th>
-                        <th class="py-2 font-semibold">Status</th>
-                    </tr>
-                </thead>
-                <tbody class="text-slate-700">
-                    ${rows}
-                </tbody>
-            </table>
-        </div>
-    `;
-}
-
-async function fetchGeneratorBookings(generatorId) {
-    const response = await fetch(`/api/generators/${encodeURIComponent(generatorId)}/bookings`);
-    if (response.status === 401) {
-        window.location.href = '/login';
-        return null;
-    }
-    if (!response.ok) {
-        return null;
-    }
-    return await response.json();
-}
-
-function configureCreateBookingPanel(status, selectedDate) {
-    if (!createBookingPanel || !createBookingHint || !generatorBookingDate) return;
-
-    if (!selectedDate) {
-        createBookingPanel.classList.add('opacity-60');
-        createBookingHint.textContent = 'Select a booked date to create a booking for this generator.';
-        generatorBookingDate.value = '';
-        generatorBookingDate.disabled = true;
-        if (generatorVendorSelect) generatorVendorSelect.disabled = true;
-        if (createBookingForm) createBookingForm.querySelector('button[type="submit"]').disabled = true;
-        return;
-    }
-
-    generatorBookingDate.value = selectedDate;
-    const isFree = status === 'Free';
-    generatorBookingDate.disabled = !isFree;
-    if (generatorVendorSelect) generatorVendorSelect.disabled = !isFree;
-    if (createBookingForm) createBookingForm.querySelector('button[type="submit"]').disabled = !isFree;
-    createBookingPanel.classList.toggle('opacity-60', !isFree);
-
-    if (status === 'Free') {
-        createBookingHint.textContent = 'Generator is free on this date. Create a booking below.';
-    } else if (status === 'Booked') {
-        createBookingHint.textContent = 'This generator is already booked on the selected date.';
-    } else {
-        createBookingHint.textContent = 'Select a booked date to determine availability.';
-    }
-}
-
-async function handleRowClick(row) {
-    const generatorId = row.dataset.generatorId;
-    if (!generatorId) return;
-    activeGeneratorId = generatorId;
-    const capacity = row.dataset.capacity || '';
-    const type = row.dataset.type || '';
-    const identification = row.dataset.identification || '';
-    const status = row.dataset.booking || '';
-    const inventoryType = row.dataset.inventoryType || 'retailer';
-    const selectedDate = bookingDateFilter?.value || '';
-
-    if (detailGeneratorTitle) {
-        detailGeneratorTitle.textContent = generatorId;
-    }
-    if (detailGeneratorMeta) {
-        const metaParts = [];
-        if (inventoryLabels[inventoryType]) metaParts.push(inventoryLabels[inventoryType]);
-        if (capacity) metaParts.push(`${capacity} kVA`);
-        if (type) metaParts.push(type);
-        if (identification) metaParts.push(identification);
-        detailGeneratorMeta.textContent = metaParts.join(' • ') || '—';
-    }
-
-    showGeneratorDetailOverlay();
-    if (generatorBookingsContent) {
-        generatorBookingsContent.textContent = 'Loading bookings...';
-    }
-
-    configureCreateBookingPanel(status, selectedDate);
-
-    try {
-        const [bookingData, vendors] = await Promise.all([
-            fetchGeneratorBookings(generatorId),
-            loadVendors()
-        ]);
-        if (vendors) renderVendorOptions(vendors);
-
-        if (bookingData && bookingData.bookings) {
-            renderBookingsList(bookingData.bookings, selectedDate);
-        } else {
-            renderBookingsList([], selectedDate);
-        }
-    } catch (error) {
-        if (generatorBookingsContent) {
-            generatorBookingsContent.textContent = 'Unable to load bookings.';
-        }
-    }
-}
+['retailerGenset', 'permanentGenset', 'emergencyGenset'].forEach(initSectionSorting);
 
 document.querySelectorAll('tr[data-generator-id]').forEach(row => {
     row.addEventListener('click', () => handleRowClick(row));
@@ -728,21 +922,32 @@ document.querySelectorAll('tr[data-generator-id]').forEach(row => {
 generatorForm?.addEventListener('submit', async function(event) {
     event.preventDefault();
 
+    const generatorId = generatorFormGeneratorId?.value || '';
     const capacity = document.getElementById('genCapacity')?.value;
     const type = document.getElementById('genType')?.value;
     const identification = document.getElementById('genIdentification')?.value || '';
     const notes = document.getElementById('genNotes')?.value || '';
     const status = document.getElementById('genStatus')?.value || 'Active';
-    const inventoryType = document.getElementById('genInventoryType')?.value || 'retailer';
+    const inventoryType = genInventoryType?.value || 'retailer';
+    const rentalVendorId = genRentalVendor?.value || '';
 
     if (!capacity || !type) {
         alert('Capacity (kVA) and Type are required.');
         return;
     }
 
+    if (inventoryType === 'permanent' && !rentalVendorId) {
+        alert('Rental Vendor is required for a Permanent Genset.');
+        return;
+    }
+
+    const isEdit = Boolean(generatorId);
+    const endpoint = isEdit ? `/api/generators/${encodeURIComponent(generatorId)}` : '/api/generators';
+    const method = isEdit ? 'PATCH' : 'POST';
+
     try {
-        const response = await fetch('/api/generators', {
-            method: 'POST',
+        const response = await fetch(endpoint, {
+            method: method,
             headers: {
                 'Content-Type': 'application/json'
             },
@@ -752,21 +957,22 @@ generatorForm?.addEventListener('submit', async function(event) {
                 identification: identification,
                 notes: notes,
                 status: status,
-                inventory_type: inventoryType
+                inventory_type: inventoryType,
+                rental_vendor_id: inventoryType === 'permanent' ? rentalVendorId : null
             })
         });
 
         const data = await response.json();
         if (response.ok) {
-            alert(`Generator created: ${data.generator_id}`);
+            alert(isEdit ? `Generator updated: ${data.generator_id}` : `Generator created: ${data.generator_id}`);
             window.location.reload();
         } else if (response.status === 401) {
             window.location.href = '/login';
         } else {
-            alert(`Error creating generator: ${data.detail || 'Unknown error'}`);
+            alert(`Error saving generator: ${data.detail || 'Unknown error'}`);
         }
     } catch (error) {
-        alert(`Error creating generator: ${error}`);
+        alert(`Error saving generator: ${error}`);
     }
 });
 

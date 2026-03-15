@@ -52,7 +52,7 @@ docker-compose logs -f       # View logs
 docker-compose restart       # Restart
 
 # Atomic-style release cutover (single-host SQLite setup)
-export APP_IMAGE_TAG=v3.0.0
+export APP_IMAGE_TAG=v3.1.0
 docker build -t generator-ledger:$APP_IMAGE_TAG .
 docker compose up -d --no-deps --force-recreate web
 curl http://localhost:8001/api/info

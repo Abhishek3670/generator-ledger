@@ -1,6 +1,10 @@
 import pytest
 
-from config import GEN_INVENTORY_EMERGENCY, GEN_INVENTORY_RETAILER
+from config import (
+    GEN_INVENTORY_EMERGENCY,
+    GEN_INVENTORY_PERMANENT,
+    GEN_INVENTORY_RETAILER,
+)
 from core import (
     DatabaseManager,
     BookingService,
@@ -239,4 +243,48 @@ def test_create_booking_auto_assign_blocks_when_retailer_and_emergency_unavailab
         service.create_booking(
             "VEN003",
             [{"capacity_kva": 45, "date": "2026-01-15"}]
+        )
+
+
+def test_create_booking_auto_assign_does_not_use_permanent_inventory(conn):
+    seed_minimal(
+        conn,
+        generators=[
+            Generator(
+                generator_id="PER-45-01",
+                capacity_kva=45,
+                inventory_type=GEN_INVENTORY_PERMANENT,
+                rental_vendor_id="RNV001",
+            ),
+        ],
+        vendors=[Vendor(vendor_id="VEN001", vendor_name="Vendor One")],
+    )
+
+    service = BookingService(conn)
+    with pytest.raises(RuntimeError, match="No retailer or emergency 45 kVA generator is available"):
+        service.create_booking(
+            "VEN001",
+            [{"capacity_kva": 45, "date": "2026-01-15"}]
+        )
+
+
+def test_create_booking_rejects_explicit_permanent_generator(conn):
+    seed_minimal(
+        conn,
+        generators=[
+            Generator(
+                generator_id="PER-45-01",
+                capacity_kva=45,
+                inventory_type=GEN_INVENTORY_PERMANENT,
+                rental_vendor_id="RNV001",
+            ),
+        ],
+        vendors=[Vendor(vendor_id="VEN001", vendor_name="Vendor One")],
+    )
+
+    service = BookingService(conn)
+    with pytest.raises(RuntimeError, match="Permanent Genset"):
+        service.create_booking(
+            "VEN001",
+            [{"generator_id": "PER-45-01", "date": "2026-01-15"}]
         )

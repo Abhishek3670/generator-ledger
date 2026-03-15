@@ -63,6 +63,8 @@ def test_permission_matrix_rows_include_capabilities_and_endpoints(app_module_an
     vendor_row = next(row for row in rows if row["key"] == "vendor_management")
     assert "PATCH /api/vendors/{vendor_id}" in vendor_row["endpoint_refs"]
     assert "PATCH /api/rental-vendors/{rental_vendor_id}" in vendor_row["endpoint_refs"]
+    generator_row = next(row for row in rows if row["key"] == "generator_management")
+    assert "PATCH /api/generators/{generator_id}" in generator_row["endpoint_refs"]
 
 
 def test_effective_permission_active_admin_follows_admin_column(app_module_and_conn):
