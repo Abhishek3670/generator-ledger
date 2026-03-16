@@ -65,6 +65,11 @@ htmlcov/
 archives/
 Backup/
 exported_data/
+Data/
+Generator_Dataset.csv
+Vendor_Dataset.csv
+app.ipynb
+app.monolith
 
 # Jupyter
 .ipynb_checkpoints/
