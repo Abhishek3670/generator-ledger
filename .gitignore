@@ -73,7 +73,7 @@ app.monolith
 
 # Jupyter
 .ipynb_checkpoints/
-*.md
+MD _folder
 !CHANGELOG.md
 !VERSIONING.md
 *.txt
