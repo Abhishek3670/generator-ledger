@@ -27,9 +27,14 @@ These inferred versions are suitable for documentation and future reference, but
   Meaning: release-oriented Docker Compose cutovers now require an explicit image tag and use versioned deployment examples.
 
 - `v3.1.0`
+  Status: documented local release baseline / previous deployment target
+  Environment: local repository history / previous `Pre-prod` target
+  Meaning: Permanent Genset inventory, rental-vendor assignment on generators, update flow for existing gensets, and booking exclusion for permanently parked stock.
+
+- `v3.1.1`
   Status: current repository version / next deployment target
   Environment: local repository / next deployment target
-  Meaning: Permanent Genset inventory, rental-vendor assignment on generators, update flow for existing gensets, and booking exclusion for permanently parked stock.
+  Meaning: runtime file logging now writes to a dedicated `logs/` folder instead of the repository root.
 
 ## Inferred Release Timeline
 
@@ -43,7 +48,8 @@ These inferred versions are suitable for documentation and future reference, but
 | `2.1.0` | Inferred local milestone | `7823c8f` -> `6f9bfe9` | Local repository history | Emergency genset inventory and fallback flow, emergency billing styling, versioning and changelog docs |
 | `2.2.0` | Tagged local release | `18076c9` -> `de113ca` | Local repo / previous `Pre-prod` target | CLI generator-capacity add option, exported data untracked from git, and release-note updates |
 | `3.0.0` | Documented local release baseline | `7c91444` release commit | Local repo / previous `Pre-prod` target | Explicit `APP_IMAGE_TAG` requirement in Compose plus versioned Docker release examples |
-| `3.1.0` | Current repo version | Post-`7c91444` working tree | Local repo / next `Pre-prod` release | Permanent Genset inventory, rental-vendor assignment on generators, generator update flow, and booking exclusion for permanently parked stock |
+| `3.1.0` | Documented local release baseline | `b3a24eb` release commit | Local repo / previous `Pre-prod` target | Permanent Genset inventory, rental-vendor assignment on generators, generator update flow, and booking exclusion for permanently parked stock |
+| `3.1.1` | Current repo version | Post-`98a413c` working tree | Local repo / next `Pre-prod` release | Runtime file logging now writes to a dedicated `logs/` folder instead of the repository root |
 
 ## Note On `2.0.1`
 
@@ -70,7 +76,7 @@ Use Semantic Versioning: `MAJOR.MINOR.PATCH`
 
 - `MAJOR`
   Use for breaking API behavior, incompatible schema changes, deployment/process changes, or workflow changes that require coordinated rollout.
-  Example: `3.1.0`
+  Example: `3.1.1`
 
 ## Source Of Truth
 
@@ -118,7 +124,7 @@ Starting point from now on:
 
 - Treat the currently running server Docker app as `v2.0.0`.
 - Treat the most recent tagged local release as `v2.2.0`.
-- Treat the current repository state as `v3.1.0`.
+- Treat the current repository state as `v3.1.1`.
 - Keep future release notes in [CHANGELOG.md](/home/aatish/app/genset/CHANGELOG.md).
 - Only add a retrospective version entry when you have either:
   - a clear commit milestone, or

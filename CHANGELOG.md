@@ -12,11 +12,21 @@ Starting with `2.2.0`, entries are maintained as active release documentation.
 
 ## [Unreleased]
 
-- No unreleased changes documented after `3.1.0` yet.
+- No unreleased changes documented after `3.1.1` yet.
+
+## [3.1.1]
+
+Status: current repository state / next deployment target  
+Basis: changes after commit `98a413c`
+
+### Changed
+
+- Runtime file logging now writes to `logs/application.log` instead of the repository root.
+- Logging setup now creates the dedicated `logs/` folder automatically before attaching the rotating file handler.
 
 ## [3.1.0]
 
-Status: current repository state / next deployment target  
+Status: documented local release baseline / previous deployment target  
 Basis: changes after release commit `7c91444`
 
 ### Added

@@ -58,7 +58,9 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
 # Application Configuration
 APP_TITLE = "Generator Booking Ledger"
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.1.1"
+LOG_DIR = os.getenv("LOG_DIR", "logs").strip() or "logs"
+LOG_FILE = os.path.join(LOG_DIR, "application.log")
 
 # Date/Time Configuration
 DATETIME_FORMAT = "%Y-%m-%d %H:%M"
@@ -80,13 +82,14 @@ GEN_INVENTORY_EMERGENCY = "emergency"
 
 def setup_logging():
     """Configures the application-wide logger to write to file and console."""
+    os.makedirs(LOG_DIR, exist_ok=True)
     
     # Define the log format
     log_formatter = logging.Formatter("[%(levelname)s] %(name)s.%(funcName)s - %(message)s")
     
     # --- Handler 1: File Handler ---
     file_handler = RotatingFileHandler(
-        "application.log", 
+        LOG_FILE,
         mode='a',
         maxBytes=5*1024*1024,  # 5MB
         backupCount=3,
