@@ -46,6 +46,7 @@ The project follows a fairly clean layered structure:
 
 ```text
 genset/
+├── .github/                 # Repository-level instructions and automation metadata
 ├── main.py                  # Main entry point: web or CLI
 ├── cli_main.py              # CLI-only entry point
 ├── config.py                # App settings, version, logging
@@ -53,10 +54,10 @@ genset/
 ├── web/                     # FastAPI app, Jinja templates, static assets
 ├── cli/                     # Interactive command-line interface
 ├── tests/                   # API, service, auth, permissions, UI behavior tests
+├── README.md                # Project guide and onboarding
 ├── CHANGELOG.md             # Release history
 ├── VERSIONING.md            # Versioning rules and release status
-├── docker-compose.yml       # Container deployment
-└── MD _folder/              # Internal project analysis and implementation docs
+└── docker-compose.yml       # Container deployment
 ```
 
 ### Core Layers
@@ -121,11 +122,12 @@ Notable schema behavior:
 
 ### API
 
-Representative endpoints:
+Representative routes and APIs:
 
+- `GET /login`
+- `POST /login`
 - `GET /health`
 - `GET /api/info`
-- `POST /login`
 - `POST /api/login`
 - `GET /api/generators`
 - `POST /api/generators`
@@ -160,7 +162,7 @@ The current app includes several practical security controls:
 - browser session authentication
 - JWT login for API clients
 - CSRF validation for session-authenticated state-changing requests
-- role-based permissions for admin and operator users
+- role-based permissions for `admin` and `operator` users
 - per-user permission overrides
 - optional HSTS and secure-cookie behavior controlled by environment
 
@@ -206,11 +208,12 @@ Recommended: replace the example secrets with secure random values.
 
 If you want the app to import initial Excel data on startup:
 
+- create `Data/` if it does not already exist
 - place `Generator_Dataset.xlsx` in `Data/`
 - place `Vendor_Dataset.xlsx` in `Data/`
 - set `LOAD_SEED_DATA=true` in `.env`
 
-Generator seed rows can also include `Inventory_Type` and `Rental_Vendor_ID`.
+Generator seed rows can also include `Inventory_Type` and `Rental_Vendor_ID`. If you use `Rental_Vendor_ID`, make sure the referenced rental vendor already exists in the database.
 
 ### 5. Start The Application
 
@@ -228,9 +231,20 @@ python main.py
 
 Default local URLs:
 
+- Login: `http://127.0.0.1:8000/login`
 - App: `http://127.0.0.1:8000`
 - API docs: `http://127.0.0.1:8000/docs`
 - Health: `http://127.0.0.1:8000/health`
+
+### 6. First Login
+
+Use the `OWNER_USERNAME` and `OWNER_PASSWORD` values from `.env` to sign in at:
+
+```text
+http://127.0.0.1:8000/login
+```
+
+That bootstrap owner account is the first admin user for the system. After login, you can manage additional users and permission overrides from `Admin Settings`.
 
 Run the CLI instead:
 
@@ -263,6 +277,8 @@ By default:
 - `Data/`, `exported_data/`, and `archives/` are mounted into the container
 
 The compose file expects `APP_IMAGE_TAG` in `.env`, which is currently `v3.1.1`.
+
+Open the app at `http://127.0.0.1:8001/login` when running with the default compose port mapping.
 
 ## Common Commands
 
@@ -343,17 +359,7 @@ Versioning and release tracking live in:
 - the app logs to `logs/application.log`
 - startup fails safely if owner credentials are missing
 - the schema is designed to migrate older databases forward without destructive resets
-
-## Related Project Docs
-
-The new README is based on the internal documentation collected in `MD _folder/`. Useful references there include:
-
-- `MD _folder/PROJECT_STUDY.md`
-- `MD _folder/START_HERE.md`
-- `MD _folder/quick_guide.md`
-- `MD _folder/ARCHITECTURE_DIAGRAM.md`
-- `MD _folder/ENVIRONMENT_SETUP.md`
-- `MD _folder/TESTING_CHECKLIST.md`
+- release/version governance is documented in `CHANGELOG.md` and `VERSIONING.md`
 
 ## Why This Repo Is Useful
 
