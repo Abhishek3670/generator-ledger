@@ -1,6 +1,6 @@
 # Generator Booking Ledger
 
-Generator Booking Ledger is a FastAPI + SQLite operations system for managing generator inventory, vendor relationships, bookings, billing visibility, and audit history in one place. It ships with a browser-based UI, a preserved CLI, authenticated APIs, and a data model tailored to day-to-day genset operations.
+Generator Booking Ledger is a FastAPI + PostgreSQL operations system for managing generator inventory, vendor relationships, bookings, billing visibility, and audit history in one place. It ships with a browser-based UI, a preserved CLI, authenticated APIs, and a data model tailored to day-to-day genset operations.
 
 The project has grown beyond a simple booking tracker. In its current form it supports:
 
@@ -13,7 +13,7 @@ The project has grown beyond a simple booking tracker. In its current form it su
 - audit-style booking history and role-based administration
 - browser sessions, JWT login for APIs, CSRF protection, and transport-security controls
 
-Current version: `3.1.1`
+Current version: `4.0.1`
 
 ## Business Model
 
@@ -62,7 +62,7 @@ genset/
 
 ### Core Layers
 
-- `core/database.py`: SQLite schema creation, additive migrations, and bootstrap-safe initialization
+- `core/database.py`: PostgreSQL connection management and Alembic-driven schema initialization
 - `core/models.py`: dataclasses and enums for generators, vendors, bookings, users, sessions, and history
 - `core/repositories.py`: SQL persistence and query logic
 - `core/services.py`: booking rules, availability checks, exports, and seed loading
@@ -74,7 +74,7 @@ genset/
 
 At a high level, requests move through the system like this:
 
-1. The app starts, initializes the SQLite schema, ensures the owner user exists, and optionally loads seed data.
+1. The app starts, applies PostgreSQL migrations, ensures the owner user exists, and optionally loads seed data.
 2. Browser requests authenticate with a signed session cookie; API clients can use JWT-based login.
 3. `web/app.py` resolves auth and permissions, opens a per-request DB connection, and dispatches routes.
 4. Repositories load and persist data.
@@ -88,7 +88,7 @@ Booking stock behavior is intentionally selective:
 
 ## Database Model
 
-The main SQLite database is `ledger.db`. Core tables include:
+The main PostgreSQL database is configured via `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME`. A full `DATABASE_URL` is still accepted as an override for tests or advanced setups. Core tables include:
 
 - `generators`
 - `vendors`
@@ -171,7 +171,7 @@ The current app includes several practical security controls:
 ### Requirements
 
 - Python `3.12+`
-- SQLite
+- PostgreSQL `14+`
 - `pip`
 
 ### 1. Create a Virtual Environment
@@ -184,7 +184,7 @@ source .venv/bin/activate
 ### 2. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+pip install -e '.[dev]'
 ```
 
 ### 3. Configure Environment
@@ -197,6 +197,11 @@ cp .env.example .env
 
 Edit `.env` and set these values before first run:
 
+- `DB_HOST`
+- `DB_PORT`
+- `DB_USER`
+- `DB_PASSWORD`
+- `DB_NAME`
 - `SESSION_SECRET`
 - `JWT_SECRET`
 - `OWNER_USERNAME`
@@ -260,7 +265,7 @@ python cli_main.py
 
 ## Docker
 
-The repo includes a single-container Docker deployment with bind mounts for operational data.
+The repo includes a single-container Docker deployment for the app. PostgreSQL is expected to run as a separate trusted service reachable from the app container.
 
 ### Start With Docker Compose
 
@@ -273,10 +278,10 @@ By default:
 
 - the container listens on `8000`
 - host port defaults to `8001` through `DOCKER_HOST_PORT`
-- the database is mounted from `./ledger.db`
+- the app derives its PostgreSQL connection from `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME`
 - `Data/`, `exported_data/`, and `archives/` are mounted into the container
 
-The compose file expects `APP_IMAGE_TAG` in `.env`, which is currently `v3.1.1`.
+The compose file expects `APP_IMAGE_TAG` in `.env`, which is currently `v4.0.1`.
 
 Open the app at `http://127.0.0.1:8001/login` when running with the default compose port mapping.
 
@@ -318,12 +323,11 @@ The test suite covers a broad slice of the current behavior, including:
 Run all tests:
 
 ```bash
-pytest
+TEST_DATABASE_URL=postgresql://user:pass@host:5432/genset_test pytest
 ```
 
 ## Operational Files And Folders
 
-- `ledger.db`: main SQLite database
 - `logs/application.log`: rotating runtime log file
 - `exported_data/`: generated CSV exports
 - `archives/`: archived historical exports
@@ -333,7 +337,15 @@ pytest
 
 Key environment variables from `.env.example`:
 
-- `DB_PATH`
+- `DB_HOST`
+- `DB_PORT`
+- `DB_USER`
+- `DB_PASSWORD`
+- `DB_NAME`
+- `DB_POOL_MIN_SIZE`
+- `DB_POOL_MAX_SIZE`
+- `DB_CONNECT_TIMEOUT`
+- `PGSSLMODE`
 - `LOAD_SEED_DATA`
 - `SESSION_SECRET`
 - `JWT_SECRET`
@@ -358,14 +370,14 @@ Versioning and release tracking live in:
 - static assets live in `web/static/`
 - the app logs to `logs/application.log`
 - startup fails safely if owner credentials are missing
-- the schema is designed to migrate older databases forward without destructive resets
+- the schema is managed through Alembic migrations against PostgreSQL
 - release/version governance is documented in `CHANGELOG.md` and `VERSIONING.md`
 
 ## Why This Repo Is Useful
 
 This project works well as both an internal operations tool and a solid example of a pragmatic Python web app:
 
-- SQLite-backed but structured with clear layers
+- PostgreSQL-backed but structured with clear layers
 - simple enough to run locally
 - serious enough to include auth, permissions, auditing, and deployment support
 - tailored to real operational problems like conflict-free bookings and permanently assigned stock

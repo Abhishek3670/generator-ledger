@@ -326,40 +326,27 @@ def test_create_and_edit_booking_pages_exclude_permanent_gensets(app_client_and_
     assert "PER-45-01" not in edit_response.text
 
 
-def test_init_schema_backfills_inventory_type_for_legacy_generators(tmp_path):
-    db_path = tmp_path / "legacy_generator_inventory.db"
-    db = DatabaseManager(str(db_path))
+def test_init_schema_exposes_inventory_columns_for_generators(test_database_url):
+    db = DatabaseManager(test_database_url)
     conn = db.connect()
     try:
+        db.init_schema()
+
         cur = conn.cursor()
         cur.execute(
             """
-            CREATE TABLE generators (
-                generator_id TEXT PRIMARY KEY,
-                capacity_kva INTEGER NOT NULL,
-                identification TEXT,
-                type TEXT,
-                status TEXT,
-                notes TEXT
-            )
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'generators'
+            ORDER BY ordinal_position
             """
         )
-        cur.execute(
-            """
-            INSERT INTO generators (generator_id, capacity_kva, identification, type, status, notes)
-            VALUES ('LEG-45-01', 45, 'Legacy', 'Silent', 'Active', 'Old schema row')
-            """
-        )
-        conn.commit()
-
-        db.init_schema()
-
-        cur.execute("PRAGMA table_info(generators)")
-        columns = [row[1] for row in cur.fetchall()]
+        columns = [row[0] for row in cur.fetchall()]
         assert "inventory_type" in columns
         assert "rental_vendor_id" in columns
 
         repo = GeneratorRepository(conn)
+        repo.save(Generator(generator_id="LEG-45-01", capacity_kva=45))
         generator = repo.get_by_id("LEG-45-01")
         assert generator is not None
         assert generator.inventory_type == GEN_INVENTORY_RETAILER

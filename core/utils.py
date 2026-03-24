@@ -7,12 +7,19 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Optional, Iterator
 
+import pandas as pd
+
 from config import DATETIME_FORMAT, DEFAULT_TIME
 
 
 def now_ts() -> int:
     """Return current UTC timestamp in seconds."""
     return int(datetime.utcnow().timestamp())
+
+
+def now_dt_str() -> str:
+    """Return the current local timestamp formatted for persisted text columns."""
+    return datetime.now().strftime(DATETIME_FORMAT)
 
 
 class DateTimeParser:
@@ -99,10 +106,24 @@ class DateTimeParser:
 @contextmanager
 def transaction(conn) -> Iterator[None]:
     """Run a block inside a DB transaction (commit or rollback)."""
+    started_tx = not conn.in_transaction
     try:
-        conn.execute("BEGIN")
+        if started_tx:
+            conn.execute("BEGIN")
         yield
-        conn.commit()
+        if started_tx:
+            conn.commit()
     except Exception:
-        conn.rollback()
+        if started_tx:
+            conn.rollback()
         raise
+
+
+def query_to_dataframe(conn, sql: str, parameters=()) -> pd.DataFrame:
+    """Execute a query and return the results as a DataFrame."""
+    cur = conn.cursor()
+    cur.execute(sql, parameters)
+    rows = cur.fetchall()
+    description = cur.description or []
+    columns = [col[0] for col in description]
+    return pd.DataFrame(rows, columns=columns)

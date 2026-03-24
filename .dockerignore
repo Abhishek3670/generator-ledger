@@ -1,13 +1,13 @@
 # Docker Ignore File
 .git
 .gitignore
-__pycache__
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
 env/
-.venv
+.venv/
 venv/
 *.egg-info/
 dist/
@@ -17,7 +17,17 @@ build/
 htmlcov/
 .DS_Store
 *.log
+logs/
 application.log.*
 .env
+.env.*
 .vscode
 .idea
+*.db
+*.sqlite
+*.sqlite3
+Backup/
+archives/
+exported_data/
+Data/
+tests/

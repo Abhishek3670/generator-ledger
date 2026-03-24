@@ -94,25 +94,6 @@ def seed_billing_data(conn) -> None:
         )
     )
 
-    # Introduce one orphan booking item so LEFT JOIN returns unknown capacity.
-    conn.execute("PRAGMA foreign_keys = OFF")
-    conn.execute(
-        """
-        INSERT INTO booking_items (booking_id, generator_id, start_dt, end_dt, item_status, remarks)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (
-            "BKG-20260210-00001",
-            "GEN-MISSING",
-            "2026-02-22 00:00",
-            "2026-02-22 23:59",
-            "Confirmed",
-            "unknown-capacity",
-        ),
-    )
-    conn.commit()
-    conn.execute("PRAGMA foreign_keys = ON")
-
     booking_repo.save(
         Booking(
             booking_id="BKG-20260210-00002",
@@ -185,7 +166,7 @@ def test_billing_lines_filters_confirmed_only_and_range_inclusive(app_module_and
 
     assert payload["from"] == "2026-02-20"
     assert payload["to"] == "2026-02-22"
-    assert payload["count"] == 4
+    assert payload["count"] == 3
     assert payload["capacities"] == [45, 65]
 
     ordered_rows = [
@@ -203,7 +184,6 @@ def test_billing_lines_filters_confirmed_only_and_range_inclusive(app_module_and
     assert ordered_rows == [
         ("VEN001", "Alpha Vendor", "BKG-20260210-00001", "2026-02-21", "GEN-45", 45, "retailer"),
         ("VEN001", "Alpha Vendor", "BKG-20260210-00001", "2026-02-22", "GEN-65", 65, GEN_INVENTORY_EMERGENCY),
-        ("VEN001", "Alpha Vendor", "BKG-20260210-00001", "2026-02-22", "GEN-MISSING", None, "retailer"),
         ("VEN002", "Beta Vendor", "BKG-20260210-00002", "2026-02-20", "GEN-65", 65, GEN_INVENTORY_EMERGENCY),
     ]
 

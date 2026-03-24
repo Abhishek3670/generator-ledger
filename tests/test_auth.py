@@ -10,20 +10,28 @@ Tests cover:
 - Rate limiting on login endpoint
 """
 
+import importlib
 import pytest
 import json
 import time
+import sys
 from datetime import datetime, timedelta
 from fastapi.testclient import TestClient
 
 from core import DatabaseManager, UserRepository
-from web.app import app
 
 
 @pytest.fixture
-def client():
+def app_module():
+    sys.modules.pop("web.app", None)
+    sys.modules.pop("web", None)
+    return importlib.import_module("web.app")
+
+
+@pytest.fixture
+def client(app_module):
     """FastAPI test client."""
-    return TestClient(app)
+    return TestClient(app_module.app)
 
 
 @pytest.fixture

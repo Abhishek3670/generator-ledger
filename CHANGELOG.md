@@ -12,11 +12,44 @@ Starting with `2.2.0`, entries are maintained as active release documentation.
 
 ## [Unreleased]
 
-- No unreleased changes documented after `3.1.1` yet.
+- No unreleased changes documented after `4.0.1` yet.
+
+## [4.0.1]
+
+Status: current repository state / next deployment target  
+Basis: Docker build hardening follow-up after `4.0.0`
+
+### Changed
+
+- Reworked the app image into a multi-stage Docker build so native build dependencies stay in the builder stage while the runtime image remains slimmer.
+- Narrowed Docker `COPY` inputs to the application code and packaging files required for the image build.
+
+### Fixed
+
+- Fresh Docker builds now tolerate future dependencies that need native compilation by installing toolchain and PostgreSQL client headers in the builder stage.
+- Docker build context now excludes local secrets, SQLite backups, exported data, logs, and tests so they are not accidentally baked into release images.
+
+## [4.0.0]
+
+Status: documented local release baseline / previous deployment target  
+Basis: PostgreSQL cutover working tree after `3.1.1`
+
+### Added
+
+- Alembic-based PostgreSQL schema management with a baseline migration for the application tables and indexes.
+- A one-time `scripts.migrate_sqlite_to_postgres` utility for cutover from `ledger.db` into PostgreSQL with row-count verification.
+- PostgreSQL-backed test fixtures driven by `TEST_DATABASE_URL` so the suite can run against the target database engine.
+
+### Changed
+
+- Replaced the SQLite runtime with PostgreSQL-only persistence using `psycopg` and `psycopg_pool` across the app, repositories, services, and CLI.
+- Switched configuration from `DB_PATH` to PostgreSQL connection settings (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`) with `DATABASE_URL` kept as an override.
+- Updated deployment packaging, Docker examples, and operational docs for an app container that connects to an external trusted PostgreSQL server.
+- Expanded runtime health checks and database helpers around PostgreSQL connectivity, transactions, and safe sequence/upsert handling.
 
 ## [3.1.1]
 
-Status: current repository state / next deployment target  
+Status: documented local release baseline / previous deployment target  
 Basis: changes after commit `98a413c`
 
 ### Changed

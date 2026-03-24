@@ -184,38 +184,34 @@ def test_delete_rental_vendor_not_found_returns_404(app_module_and_conn):
     assert exc_info.value.detail == "Rental vendor not found"
 
 
-def test_init_schema_migrates_legacy_rental_vendor_id_column(tmp_path):
-    db_path = tmp_path / "legacy_rental_vendor_schema.db"
-    db = DatabaseManager(str(db_path))
+def test_init_schema_exposes_rental_vendor_id_column(test_database_url):
+    db = DatabaseManager(test_database_url)
     conn = db.connect()
     try:
+        db.init_schema()
+
         cur = conn.cursor()
         cur.execute(
             """
-            CREATE TABLE rental_vendors (
-                vendor_id TEXT PRIMARY KEY,
-                vendor_name TEXT NOT NULL,
-                vendor_place TEXT,
-                phone TEXT
-            )
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'rental_vendors'
+            ORDER BY ordinal_position
             """
         )
-        cur.execute(
-            """
-            INSERT INTO rental_vendors (vendor_id, vendor_name, vendor_place, phone)
-            VALUES ('RNV001', 'Legacy Hotel', 'Civil Line', '111')
-            """
-        )
-        conn.commit()
-
-        db.init_schema()
-
-        cur.execute("PRAGMA table_info(rental_vendors)")
-        columns = [row[1] for row in cur.fetchall()]
+        columns = [row[0] for row in cur.fetchall()]
         assert "rental_vendor_id" in columns
         assert "vendor_id" not in columns
 
         repo = RentalVendorRepository(conn)
+        repo.save(
+            RentalVendor(
+                rental_vendor_id="RNV001",
+                vendor_name="Legacy Hotel",
+                vendor_place="Civil Line",
+                phone="111",
+            )
+        )
         vendor = repo.get_by_id("RNV001")
         assert vendor is not None
         assert vendor.rental_vendor_id == "RNV001"

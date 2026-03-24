@@ -6,13 +6,22 @@ from __future__ import annotations
 
 import contextvars
 import logging
-import sqlite3
+import re
 import time
-from typing import Optional, Tuple
+from typing import Any, Callable, Optional, Sequence, Tuple
+
+import psycopg
+from psycopg.pq import TransactionStatus
+from psycopg.rows import tuple_row
+from psycopg_pool import ConnectionPool
 
 from config import DB_SLOW_QUERY_MS
 
 logger = logging.getLogger("observability.db")
+
+DatabaseError = psycopg.Error
+
+_QMARK_PATTERN = re.compile(r"\?")
 
 _request_label_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     "request_label",
@@ -59,6 +68,13 @@ def get_request_db_metrics() -> Tuple[int, float]:
     return _request_query_count_var.get(), _request_query_ms_var.get()
 
 
+def _translate_sql(sql: str) -> str:
+    stripped = (sql or "").strip()
+    if stripped.upper() == "BEGIN IMMEDIATE":
+        return "BEGIN"
+    return _QMARK_PATTERN.sub("%s", sql)
+
+
 def _record_query(sql: str, elapsed_ms: float) -> None:
     count = _request_query_count_var.get() + 1
     _request_query_count_var.set(count)
@@ -82,50 +98,179 @@ def _record_query(sql: str, elapsed_ms: float) -> None:
     )
 
 
-class ObservedCursor(sqlite3.Cursor):
+class ObservedCursor:
     """
-    Cursor that records query counts and duration.
+    Cursor wrapper that records query counts and duration while translating
+    SQLite-style qmark placeholders to psycopg's pyformat placeholders.
     """
 
-    def _run_and_track(self, sql: str, fn, *args):
+    def __init__(self, raw_cursor: Any):
+        self._raw_cursor = raw_cursor
+
+    def _run_and_track(
+        self,
+        sql: str,
+        runner: Callable[..., Any],
+        *args: Any,
+    ) -> Any:
+        translated_sql = _translate_sql(sql)
         started = time.perf_counter()
         try:
-            return fn(*args)
+            return runner(translated_sql, *args)
         finally:
             elapsed_ms = (time.perf_counter() - started) * 1000.0
-            _record_query(sql, elapsed_ms)
+            _record_query(translated_sql, elapsed_ms)
 
-    def execute(self, sql, parameters=()):  # type: ignore[override]
-        return self._run_and_track(sql, super().execute, sql, parameters)
+    def execute(self, sql: str, parameters: Sequence[Any] | None = None) -> "ObservedCursor":
+        self._run_and_track(sql, self._raw_cursor.execute, tuple(parameters or ()))
+        return self
 
-    def executemany(self, sql, seq_of_parameters):  # type: ignore[override]
-        return self._run_and_track(sql, super().executemany, sql, seq_of_parameters)
+    def executemany(
+        self,
+        sql: str,
+        seq_of_parameters: Sequence[Sequence[Any]],
+    ) -> "ObservedCursor":
+        self._run_and_track(sql, self._raw_cursor.executemany, seq_of_parameters)
+        return self
 
-    def executescript(self, sql_script):  # type: ignore[override]
-        return self._run_and_track(sql_script, super().executescript, sql_script)
+    def fetchone(self) -> Any:
+        return self._raw_cursor.fetchone()
+
+    def fetchall(self) -> list[Any]:
+        return list(self._raw_cursor.fetchall())
+
+    def close(self) -> None:
+        self._raw_cursor.close()
+
+    def __iter__(self):
+        return iter(self._raw_cursor)
+
+    def __enter__(self) -> "ObservedCursor":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    @property
+    def description(self) -> Any:
+        return self._raw_cursor.description
+
+    @property
+    def rowcount(self) -> int:
+        return self._raw_cursor.rowcount
 
 
-class ObservedConnection(sqlite3.Connection):
+class DBConnection:
     """
-    Connection that creates observed cursors by default.
+    Thin psycopg connection wrapper matching the subset of sqlite3 usage in the app.
     """
 
-    def cursor(self, factory: Optional[type] = None):  # type: ignore[override]
-        return super().cursor(factory or ObservedCursor)
+    def __init__(
+        self,
+        raw_connection: Any,
+        *,
+        close_callback: Optional[Callable[[Any], None]] = None,
+    ):
+        self._raw_connection = raw_connection
+        self._close_callback = close_callback
+        self._closed = False
+
+    def cursor(self) -> ObservedCursor:
+        return ObservedCursor(self._raw_connection.cursor())
+
+    def execute(
+        self,
+        sql: str,
+        parameters: Sequence[Any] | None = None,
+    ) -> ObservedCursor:
+        cur = self.cursor()
+        cur.execute(sql, parameters)
+        return cur
+
+    def commit(self) -> None:
+        self._raw_connection.commit()
+
+    def rollback(self) -> None:
+        self._raw_connection.rollback()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._close_callback:
+            self._close_callback(self._raw_connection)
+        else:
+            self._raw_connection.close()
+
+    @property
+    def in_transaction(self) -> bool:
+        return self._raw_connection.info.transaction_status != TransactionStatus.IDLE
+
+    @property
+    def raw_connection(self) -> Any:
+        return self._raw_connection
 
 
-def connect_sqlite(
-    db_path: str,
+def connect_db(
+    database_url: str,
     *,
-    detect_types: int = sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
-    check_same_thread: bool = True,
-) -> sqlite3.Connection:
+    connect_timeout: int = 10,
+    sslmode: Optional[str] = None,
+) -> DBConnection:
     """
-    Create an instrumented SQLite connection.
+    Create an instrumented PostgreSQL connection.
     """
-    return sqlite3.connect(
-        db_path,
-        detect_types=detect_types,
-        check_same_thread=check_same_thread,
-        factory=ObservedConnection,
-    )
+    connect_kwargs: dict[str, Any] = {
+        "row_factory": tuple_row,
+        "connect_timeout": connect_timeout,
+    }
+    if sslmode:
+        connect_kwargs["sslmode"] = sslmode
+
+    raw_connection = psycopg.connect(database_url, **connect_kwargs)
+    return DBConnection(raw_connection)
+
+
+class DatabasePool:
+    """
+    PostgreSQL connection pool returning instrumented DBConnection wrappers.
+    """
+
+    def __init__(
+        self,
+        database_url: str,
+        *,
+        min_size: int = 1,
+        max_size: int = 10,
+        connect_timeout: int = 10,
+        sslmode: Optional[str] = None,
+    ):
+        pool_kwargs: dict[str, Any] = {
+            "row_factory": tuple_row,
+            "connect_timeout": connect_timeout,
+        }
+        if sslmode:
+            pool_kwargs["sslmode"] = sslmode
+
+        self._pool = ConnectionPool(
+            conninfo=database_url,
+            min_size=min_size,
+            max_size=max_size,
+            kwargs=pool_kwargs,
+            open=False,
+        )
+
+    def open(self) -> None:
+        self._pool.open()
+        self._pool.wait()
+
+    def close(self) -> None:
+        self._pool.close()
+
+    def get_connection(self) -> DBConnection:
+        raw_connection = self._pool.getconn()
+        return DBConnection(
+            raw_connection,
+            close_callback=self._pool.putconn,
+        )
+
