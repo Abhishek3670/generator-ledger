@@ -2,40 +2,82 @@
 Database connection and schema management.
 """
 
-import sqlite3
+from __future__ import annotations
+
 import logging
+import os
+from pathlib import Path
 from typing import Optional
 
+from alembic import command
+from alembic.config import Config
+
 from config import (
-    STATUS_CONFIRMED,
-    GEN_STATUS_ACTIVE,
-    OWNER_USERNAME,
-    GEN_INVENTORY_RETAILER,
-    GEN_INVENTORY_PERMANENT,
+    DATABASE_URL,
+    DB_CONNECT_TIMEOUT,
+    DB_POOL_MAX_SIZE,
+    DB_POOL_MIN_SIZE,
+    PGSSLMODE,
 )
-from .observability import connect_sqlite
+from .observability import DBConnection, DatabasePool, connect_db
 
 
 class DatabaseManager:
-    """Manages database connections and schema initialization."""
-    
-    def __init__(self, db_path: str = "ledger.db"):
-        self.db_path = db_path
-        self.conn: Optional[sqlite3.Connection] = None
+    """Manages PostgreSQL connections and schema initialization."""
+
+    def __init__(self, database_url: Optional[str] = None):
+        self.database_url = self._resolve_database_url(database_url)
+        self.conn: Optional[DBConnection] = None
         self.logger = logging.getLogger(self.__class__.__name__)
-    
-    def connect(self) -> sqlite3.Connection:
-        """Create and return a database connection."""
-        try:
-            self.conn = connect_sqlite(
-                self.db_path,
+
+    def _resolve_database_url(self, database_url: Optional[str]) -> str:
+        candidate = (database_url or "").strip() or DATABASE_URL or os.getenv("TEST_DATABASE_URL", "").strip()
+        if candidate and "://" not in candidate:
+            fallback = (
+                os.getenv("DATABASE_URL", "").strip()
+                or os.getenv("TEST_DATABASE_URL", "").strip()
             )
-            self.conn.execute("PRAGMA foreign_keys = ON")
-            self.logger.info(f"Database connected | context={{'db_path': '{self.db_path}'}}")
-            return self.conn
-        except sqlite3.Error as e:
-            self.logger.error(f"Failed to connect to database | context={{'db_path': '{self.db_path}'}}", exc_info=True)
-            raise
+            if fallback:
+                self.logger = logging.getLogger(self.__class__.__name__)
+                self.logger.warning(
+                    "Legacy SQLite path ignored in favor of PostgreSQL URL | context=%s",
+                    {"legacy_value": candidate},
+                )
+                return fallback
+            raise RuntimeError(
+                "SQLite database paths are no longer supported. "
+                "Set DATABASE_URL or the DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME variables."
+            )
+        if not candidate:
+            raise RuntimeError(
+                "PostgreSQL configuration is required. "
+                "Set DATABASE_URL or the DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME variables."
+            )
+        return candidate
+
+    def connect(self) -> DBConnection:
+        """Create and return a database connection."""
+        self.conn = connect_db(
+            self.database_url,
+            connect_timeout=DB_CONNECT_TIMEOUT,
+            sslmode=PGSSLMODE or None,
+        )
+        self.logger.info(
+            "Database connected | context=%s",
+            {"database_url": self.redacted_url},
+        )
+        return self.conn
+
+    def create_pool(self) -> DatabasePool:
+        """Create a pooled connection manager."""
+        pool = DatabasePool(
+            self.database_url,
+            min_size=DB_POOL_MIN_SIZE,
+            max_size=DB_POOL_MAX_SIZE,
+            connect_timeout=DB_CONNECT_TIMEOUT,
+            sslmode=PGSSLMODE or None,
+        )
+        return pool
 
     def close(self) -> None:
         """Close the database connection."""
@@ -43,233 +85,37 @@ class DatabaseManager:
             self.conn.close()
             self.conn = None
             self.logger.info("Database connection closed")
-    
+
     def init_schema(self) -> None:
-        """Initialize database schema with all required tables."""
-        if not self.conn:
-            self.logger.error("Attempted schema init without connection")
-            raise RuntimeError("Database not connected")
-        
-        try:
-            cur = self.conn.cursor()
-            cur.executescript(f"""
-            CREATE TABLE IF NOT EXISTS generators (
-                generator_id TEXT PRIMARY KEY,
-                capacity_kva INTEGER NOT NULL,
-                identification TEXT,
-                type TEXT,
-                status TEXT DEFAULT '{GEN_STATUS_ACTIVE}',
-                notes TEXT,
-                inventory_type TEXT DEFAULT '{GEN_INVENTORY_RETAILER}',
-                rental_vendor_id TEXT
-            );
-            
-            CREATE TABLE IF NOT EXISTS vendors (
-                vendor_id TEXT PRIMARY KEY,
-                vendor_name TEXT NOT NULL,
-                vendor_place TEXT,
-                phone TEXT
-            );
+        """Apply Alembic migrations to the target database."""
+        cfg = Config(str(self._alembic_ini_path()))
+        cfg.attributes["database_url"] = self.database_url
+        cfg.attributes["configure_logger"] = False
+        command.upgrade(cfg, "head")
+        self.logger.info(
+            "Database migrations applied | context=%s",
+            {"database_url": self.redacted_url},
+        )
 
-            CREATE TABLE IF NOT EXISTS rental_vendors (
-                rental_vendor_id TEXT PRIMARY KEY,
-                vendor_name TEXT NOT NULL,
-                vendor_place TEXT,
-                phone TEXT
-            );
-            
-            CREATE TABLE IF NOT EXISTS bookings (
-                booking_id TEXT PRIMARY KEY,
-                vendor_id TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                status TEXT DEFAULT '{STATUS_CONFIRMED}',
-                FOREIGN KEY(vendor_id) REFERENCES vendors(vendor_id)
-            );
+    @property
+    def redacted_url(self) -> str:
+        return redact_database_url(self.database_url)
 
-            CREATE TABLE IF NOT EXISTS booking_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                booking_id TEXT NOT NULL,
-                generator_id TEXT NOT NULL,
-                start_dt TEXT NOT NULL,
-                end_dt TEXT NOT NULL,
-                item_status TEXT DEFAULT '{STATUS_CONFIRMED}',
-                remarks TEXT,
-                FOREIGN KEY(booking_id) REFERENCES bookings(booking_id),
-                FOREIGN KEY(generator_id) REFERENCES generators(generator_id)
-            );
+    @staticmethod
+    def _alembic_ini_path() -> Path:
+        return Path(__file__).resolve().parent.parent / "alembic.ini"
 
-            CREATE TABLE IF NOT EXISTS booking_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                event_time TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                booking_id TEXT,
-                vendor_id TEXT,
-                summary TEXT,
-                details TEXT
-            );
 
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL,
-                is_active INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                last_login TEXT
-            );
+def redact_database_url(database_url: str) -> str:
+    """Return a DSN safe for logs and API payloads."""
+    if not database_url:
+        return ""
+    if "@" not in database_url:
+        return database_url
 
-            CREATE TABLE IF NOT EXISTS user_permission_overrides (
-                user_id INTEGER NOT NULL,
-                capability_key TEXT NOT NULL,
-                is_allowed INTEGER NOT NULL CHECK (is_allowed IN (0, 1)),
-                PRIMARY KEY (user_id, capability_key),
-                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-            );
+    scheme_and_auth, host_part = database_url.split("@", 1)
+    if ":" not in scheme_and_auth:
+        return f"{scheme_and_auth}@{host_part}"
 
-            CREATE TABLE IF NOT EXISTS sessions (
-                session_id TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                csrf_token TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL,
-                last_seen INTEGER,
-                ip_address TEXT,
-                user_agent TEXT,
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS revoked_tokens (
-                jti TEXT PRIMARY KEY,
-                expires_at INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS booking_id_seq (
-                booking_date TEXT PRIMARY KEY,
-                next_val INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS vendor_id_seq (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                next_val INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS rental_vendor_id_seq (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                next_val INTEGER NOT NULL
-            );
-
-            INSERT OR IGNORE INTO vendor_id_seq (id, next_val) VALUES (1, 1);
-            INSERT OR IGNORE INTO rental_vendor_id_seq (id, next_val) VALUES (1, 1);
-
-            CREATE INDEX IF NOT EXISTS idx_booking_items_generator 
-                ON booking_items(generator_id, item_status);
-
-            CREATE INDEX IF NOT EXISTS idx_booking_items_booking 
-                ON booking_items(booking_id);
-
-            CREATE INDEX IF NOT EXISTS idx_booking_history_time
-                ON booking_history(event_time);
-
-            CREATE INDEX IF NOT EXISTS idx_booking_history_booking
-                ON booking_history(booking_id);
-
-            CREATE INDEX IF NOT EXISTS idx_booking_history_vendor
-                ON booking_history(vendor_id);
-
-            CREATE INDEX IF NOT EXISTS idx_sessions_user_id
-                ON sessions(user_id);
-
-            CREATE INDEX IF NOT EXISTS idx_sessions_expires_at
-                ON sessions(expires_at);
-
-            CREATE INDEX IF NOT EXISTS idx_user_permission_overrides_user_id
-                ON user_permission_overrides(user_id);
-
-            CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires_at
-                ON revoked_tokens(expires_at);
-            """)
-            # Migrate legacy rental_vendors.vendor_id column to rental_vendor_id
-            cur.execute("PRAGMA table_info(rental_vendors)")
-            rental_vendor_cols = {row[1] for row in cur.fetchall()}
-            if "vendor_id" in rental_vendor_cols and "rental_vendor_id" not in rental_vendor_cols:
-                cur.execute(
-                    "ALTER TABLE rental_vendors RENAME COLUMN vendor_id TO rental_vendor_id"
-                )
-
-            # Ensure booking_history has user column for audit trail
-            cur.execute("PRAGMA table_info(generators)")
-            generator_cols = {row[1] for row in cur.fetchall()}
-            if "inventory_type" not in generator_cols:
-                cur.execute(
-                    f"ALTER TABLE generators ADD COLUMN inventory_type TEXT DEFAULT '{GEN_INVENTORY_RETAILER}'"
-                )
-
-            cur.execute(
-                """
-                UPDATE generators
-                SET inventory_type = ?
-                WHERE inventory_type IS NULL OR TRIM(inventory_type) = ''
-                """,
-                (GEN_INVENTORY_RETAILER,),
-            )
-
-            if "rental_vendor_id" not in generator_cols:
-                cur.execute(
-                    "ALTER TABLE generators ADD COLUMN rental_vendor_id TEXT"
-                )
-
-            cur.execute(
-                """
-                UPDATE generators
-                SET rental_vendor_id = NULL
-                WHERE TRIM(COALESCE(rental_vendor_id, '')) = ''
-                """
-            )
-
-            cur.execute(
-                """
-                UPDATE generators
-                SET rental_vendor_id = NULL
-                WHERE inventory_type <> ?
-                """,
-                (GEN_INVENTORY_PERMANENT,),
-            )
-
-            cur.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_generators_inventory_type
-                ON generators(inventory_type, generator_id)
-                """
-            )
-
-            cur.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_generators_inventory_rental_vendor
-                ON generators(inventory_type, rental_vendor_id, generator_id)
-                """
-            )
-
-            cur.execute("PRAGMA table_info(booking_history)")
-            existing_cols = {row[1] for row in cur.fetchall()}
-            if "user" not in existing_cols:
-                cur.execute("ALTER TABLE booking_history ADD COLUMN user TEXT")
-
-            # Backfill legacy history rows with owner when user is missing
-            owner_label = OWNER_USERNAME or "owner"
-            cur.execute(
-                "UPDATE booking_history SET user = ? WHERE user IS NULL OR user = ''",
-                (owner_label,)
-            )
-
-            self.conn.commit()
-            self.logger.info("Database schema initialized successfully")
-        except sqlite3.Error as e:
-            self.logger.error("Schema initialization failed", exc_info=True)
-            raise
-    
-    def __enter__(self):
-        self.connect()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+    scheme, _auth = scheme_and_auth.rsplit(":", 1)
+    return f"{scheme}:***@{host_part}"

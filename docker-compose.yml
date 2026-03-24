@@ -9,9 +9,16 @@ services:
       - ./Data:/app/Data
       - ./exported_data:/app/exported_data
       - ./archives:/app/archives
-      - ./ledger.db:/app/ledger.db
     environment:
-      - DB_PATH=/app/ledger.db
+      - DB_HOST=${DB_HOST:?DB_HOST not set}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:?DB_USER not set}
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD not set}
+      - DB_NAME=${DB_NAME:?DB_NAME not set}
+      - DB_POOL_MIN_SIZE=${DB_POOL_MIN_SIZE:-1}
+      - DB_POOL_MAX_SIZE=${DB_POOL_MAX_SIZE:-10}
+      - DB_CONNECT_TIMEOUT=${DB_CONNECT_TIMEOUT:-10}
+      - PGSSLMODE=${PGSSLMODE:-}
       - HOST=${HOST:-0.0.0.0}
       - PORT=8000
       - DEBUG=${DEBUG:-false}

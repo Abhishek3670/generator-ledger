@@ -2,7 +2,8 @@
 Business logic services for the Generator Booking Ledger system.
 """
 
-import sqlite3
+from __future__ import annotations
+
 import pandas as pd
 import os
 import logging
@@ -18,7 +19,8 @@ from .models import (
 from .repositories import (
     GeneratorRepository, VendorRepository, BookingRepository, BookingHistoryRepository
 )
-from .utils import DateTimeParser, DATETIME_FORMAT, transaction
+from .observability import DBConnection, DatabaseError
+from .utils import DateTimeParser, DATETIME_FORMAT, transaction, query_to_dataframe
 from .validation import ensure_booking, ensure_generator, ensure_vendor
 
 
@@ -36,7 +38,7 @@ def encode_history_items(items: List[Dict[str, str]]) -> str:
 
 
 def log_booking_history(
-    conn: sqlite3.Connection,
+    conn: DBConnection,
     event_type: str,
     booking_id: Optional[str] = None,
     vendor_id: Optional[str] = None,
@@ -58,7 +60,7 @@ def log_booking_history(
             details=details
         )
         repo.save(event)
-    except (ValueError, sqlite3.Error, KeyError):
+    except (ValueError, DatabaseError, KeyError):
         logger.warning(
             f"Failed to record history | context={{'event_type': '{event_type}', 'booking_id': '{booking_id}'}}",
             exc_info=True
@@ -85,7 +87,7 @@ class RetailerOutOfStockError(RuntimeError):
 class AvailabilityChecker:
     """Checks generator availability and finds conflicts."""
     
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: DBConnection):
         self.conn = conn
         self.booking_repo = BookingRepository(conn)
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -184,7 +186,7 @@ class AvailabilityChecker:
 class BookingService:
     """Business logic for booking operations."""
     
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: DBConnection):
         self.conn = conn
         self.booking_repo = BookingRepository(conn)
         self.vendor_repo = VendorRepository(conn)
@@ -664,7 +666,7 @@ class BookingService:
 class ExportService:
     """Handles data export operations."""
     
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: DBConnection):
         self.conn = conn
         self.logger = logging.getLogger(self.__class__.__name__)
     
@@ -673,19 +675,19 @@ class ExportService:
         try:
             os.makedirs(out_dir, exist_ok=True)
             
-            pd.read_sql_query("SELECT * FROM bookings", self.conn).to_csv(
+            query_to_dataframe(self.conn, "SELECT * FROM bookings").to_csv(
                 os.path.join(out_dir, "bookings.csv"), index=False
             )
-            pd.read_sql_query("SELECT * FROM booking_items", self.conn).to_csv(
+            query_to_dataframe(self.conn, "SELECT * FROM booking_items").to_csv(
                 os.path.join(out_dir, "booking_items.csv"), index=False
             )
-            pd.read_sql_query("SELECT * FROM generators", self.conn).to_csv(
+            query_to_dataframe(self.conn, "SELECT * FROM generators").to_csv(
                 os.path.join(out_dir, "Generator_Dataset.csv"), index=False
             )
-            pd.read_sql_query("SELECT * FROM vendors", self.conn).to_csv(
+            query_to_dataframe(self.conn, "SELECT * FROM vendors").to_csv(
                 os.path.join(out_dir, "Vendor_Dataset.csv"), index=False
             )
-            pd.read_sql_query("SELECT * FROM rental_vendors", self.conn).to_csv(
+            query_to_dataframe(self.conn, "SELECT * FROM rental_vendors").to_csv(
                 os.path.join(out_dir, "Rental_Vendor_Dataset.csv"), index=False
             )
             
@@ -695,7 +697,7 @@ class ExportService:
                 os.path.join(out_dir, "bookings.csv"),
                 os.path.join(out_dir, "booking_items.csv")
             )
-        except (OSError, IOError, sqlite3.Error, pandas.errors.DatabaseError):
+        except (OSError, IOError, DatabaseError, pd.errors.DatabaseError):
             self.logger.error("Export failed", exc_info=True)
             raise
 
@@ -706,7 +708,7 @@ class DataLoader:
     GENERATOR_DB_PATH = "Data/Generator_Dataset.xlsx"
     VENDOR_DB_PATH = "Data/Vendor_Dataset.xlsx"
     
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: DBConnection):
         self.conn = conn
         self.generator_repo = GeneratorRepository(conn)
         self.vendor_repo = VendorRepository(conn)
@@ -812,7 +814,7 @@ class DataLoader:
 
 
 def archive_all_bookings(
-    conn: sqlite3.Connection,
+    conn: DBConnection,
     archive_dir: str = "archives"
 ) -> Tuple[bool, str]:
     """
@@ -833,8 +835,8 @@ def archive_all_bookings(
             items_archive = os.path.join(archive_dir, f"booking_items_{current_month}_{timestamp}.csv")
         
         # Export to CSV
-        bookings_df = pd.read_sql_query("SELECT * FROM bookings", conn)
-        items_df = pd.read_sql_query("SELECT * FROM booking_items", conn)
+        bookings_df = query_to_dataframe(conn, "SELECT * FROM bookings")
+        items_df = query_to_dataframe(conn, "SELECT * FROM booking_items")
         
         if bookings_df.empty and items_df.empty:
             return False, "No bookings to archive"
@@ -861,7 +863,7 @@ def archive_all_bookings(
 
 
 def create_vendor(
-    conn: sqlite3.Connection,
+    conn: DBConnection,
     vendor_id: str,
     vendor_name: str,
     vendor_place: str = "",
@@ -882,7 +884,7 @@ def create_vendor(
 
 
 def create_rental_vendor(
-    conn: sqlite3.Connection,
+    conn: DBConnection,
     rental_vendor_id: str,
     vendor_name: str,
     vendor_place: str = "",
@@ -904,7 +906,7 @@ def create_rental_vendor(
 
 
 def _create_directory_vendor(
-    conn: sqlite3.Connection,
+    conn: DBConnection,
     table_name: str,
     entity_id: str,
     vendor_name: str,

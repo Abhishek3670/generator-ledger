@@ -2,7 +2,8 @@
 Repository layer for data access.
 """
 
-import sqlite3
+from __future__ import annotations
+
 import logging
 from typing import Optional, List, Dict, Any
 
@@ -25,6 +26,8 @@ from .models import (
     User,
     UserSession,
 )
+from .observability import DBConnection, DatabaseError
+from .utils import now_dt_str
 
 
 class GeneratorRepository:
@@ -34,7 +37,7 @@ class GeneratorRepository:
         "generator_id, capacity_kva, identification, type, status, notes, inventory_type, rental_vendor_id"
     )
     
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: DBConnection):
         self.conn = conn
         self.logger = logging.getLogger(self.__class__.__name__)
 
@@ -99,9 +102,18 @@ class GeneratorRepository:
                 else ""
             )
             cur.execute(
-                """INSERT OR REPLACE INTO generators
+                """INSERT INTO generators
                 (generator_id, capacity_kva, identification, type, status, notes, inventory_type, rental_vendor_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (generator_id)
+                DO UPDATE SET
+                    capacity_kva = EXCLUDED.capacity_kva,
+                    identification = EXCLUDED.identification,
+                    type = EXCLUDED.type,
+                    status = EXCLUDED.status,
+                    notes = EXCLUDED.notes,
+                    inventory_type = EXCLUDED.inventory_type,
+                    rental_vendor_id = EXCLUDED.rental_vendor_id""",
                 (
                     generator.generator_id,
                     generator.capacity_kva,
@@ -114,7 +126,7 @@ class GeneratorRepository:
                 ),
             )
             self.conn.commit()
-        except sqlite3.Error:
+        except DatabaseError:
             self.logger.error(f"Failed to save generator | context={{'id': '{generator.generator_id}'}}", exc_info=True)
             raise
 
@@ -162,7 +174,7 @@ class _VendorDirectoryRepository:
     ID_ATTR = "vendor_id"
     MODEL_CLS = Vendor
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: DBConnection):
         self.conn = conn
         self.logger = logging.getLogger(self.__class__.__name__)
 
@@ -193,9 +205,14 @@ class _VendorDirectoryRepository:
         try:
             cur = self.conn.cursor()
             cur.execute(
-                f"""INSERT OR REPLACE INTO {self.TABLE_NAME}
+                f"""INSERT INTO {self.TABLE_NAME}
                 ({self.ID_COLUMN}, vendor_name, vendor_place, phone)
-                VALUES (?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT ({self.ID_COLUMN})
+                DO UPDATE SET
+                    vendor_name = EXCLUDED.vendor_name,
+                    vendor_place = EXCLUDED.vendor_place,
+                    phone = EXCLUDED.phone""",
                 (
                     entity_id,
                     vendor.vendor_name,
@@ -204,7 +221,7 @@ class _VendorDirectoryRepository:
                 ),
             )
             self.conn.commit()
-        except sqlite3.Error:
+        except DatabaseError:
             self.logger.error(f"Failed to save vendor | context={{'id': '{entity_id}'}}", exc_info=True)
             raise
 
@@ -254,22 +271,31 @@ class _VendorDirectoryRepository:
         cur = self.conn.cursor()
         started_tx = False
         if not self.conn.in_transaction:
-            self.conn.execute("BEGIN IMMEDIATE")
+            self.conn.execute("BEGIN")
             started_tx = True
 
         try:
             cur.execute(
-                f"INSERT OR IGNORE INTO {self.SEQ_TABLE_NAME} (id, next_val) VALUES (1, 1)"
+                f"""
+                INSERT INTO {self.SEQ_TABLE_NAME} (id, next_val)
+                VALUES (1, 1)
+                ON CONFLICT (id) DO NOTHING
+                """
             )
-            cur.execute(f"SELECT next_val FROM {self.SEQ_TABLE_NAME} WHERE id = 1")
+            cur.execute(
+                f"SELECT next_val FROM {self.SEQ_TABLE_NAME} WHERE id = 1 FOR UPDATE"
+            )
             row = cur.fetchone()
             seq_val = row[0] if row else 1
 
             prefix_length = len(self.ID_PREFIX)
             cur.execute(
-                f"SELECT MAX(CAST(SUBSTR({self.ID_COLUMN}, {prefix_length + 1}) AS INTEGER)) "
-                f"FROM {self.TABLE_NAME} WHERE {self.ID_COLUMN} GLOB ?",
-                (f"{self.ID_PREFIX}[0-9]*",),
+                f"""
+                SELECT MAX(CAST(SUBSTRING({self.ID_COLUMN} FROM {prefix_length + 1}) AS INTEGER))
+                FROM {self.TABLE_NAME}
+                WHERE {self.ID_COLUMN} ~ ?
+                """,
+                (f"^{self.ID_PREFIX}[0-9]+$",),
             )
             max_row = cur.fetchone()
             max_existing = max_row[0] if max_row and max_row[0] else 0
@@ -315,7 +341,7 @@ class RentalVendorRepository(_VendorDirectoryRepository):
 class BookingRepository:
     """Repository for booking data access."""
     
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: DBConnection):
         self.conn = conn
         self.logger = logging.getLogger(self.__class__.__name__)
     
@@ -338,15 +364,20 @@ class BookingRepository:
         try:
             cur = self.conn.cursor()
             cur.execute(
-                """INSERT OR REPLACE INTO bookings
+                """INSERT INTO bookings
                 (booking_id, vendor_id, created_at, status)
-                VALUES (?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (booking_id)
+                DO UPDATE SET
+                    vendor_id = EXCLUDED.vendor_id,
+                    created_at = EXCLUDED.created_at,
+                    status = EXCLUDED.status""",
                 (booking.booking_id, booking.vendor_id, booking.created_at, booking.status)
             )
             if commit:
                 self.conn.commit()
             self.logger.info(f"Booking saved | context={{'booking_id': '{booking.booking_id}'}}")
-        except sqlite3.Error:
+        except DatabaseError:
             self.logger.error(f"Failed to save booking | context={{'booking_id': '{booking.booking_id}'}}", exc_info=True)
             raise
     
@@ -731,7 +762,7 @@ class BookingRepository:
             )
             if commit:
                 self.conn.commit()
-        except sqlite3.Error:
+        except DatabaseError:
             self.logger.error(f"Failed to save booking item | context={{'booking_id': '{item.booking_id}', 'gen_id': '{item.generator_id}'}}", exc_info=True)
             raise
     
@@ -756,16 +787,20 @@ class BookingRepository:
 
         started_tx = False
         if not self.conn.in_transaction:
-            self.conn.execute("BEGIN IMMEDIATE")
+            self.conn.execute("BEGIN")
             started_tx = True
 
         try:
             cur.execute(
-                "INSERT OR IGNORE INTO booking_id_seq (booking_date, next_val) VALUES (?, 1)",
+                """
+                INSERT INTO booking_id_seq (booking_date, next_val)
+                VALUES (?, 1)
+                ON CONFLICT (booking_date) DO NOTHING
+                """,
                 (today,)
             )
             cur.execute(
-                "SELECT next_val FROM booking_id_seq WHERE booking_date = ?",
+                "SELECT next_val FROM booking_id_seq WHERE booking_date = ? FOR UPDATE",
                 (today,)
             )
             row = cur.fetchone()
@@ -798,7 +833,7 @@ class BookingRepository:
 class BookingHistoryRepository:
     """Repository for booking history events."""
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: DBConnection):
         self.conn = conn
         self.logger = logging.getLogger(self.__class__.__name__)
 
@@ -807,7 +842,7 @@ class BookingHistoryRepository:
             cur = self.conn.cursor()
             cur.execute(
                 """INSERT INTO booking_history
-                (event_time, event_type, booking_id, vendor_id, user, summary, details)
+                (event_time, event_type, booking_id, vendor_id, "user", summary, details)
                 VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     event.event_time,
@@ -821,7 +856,7 @@ class BookingHistoryRepository:
             )
             if commit:
                 self.conn.commit()
-        except sqlite3.Error:
+        except DatabaseError:
             self.logger.error(
                 "Failed to save booking history event",
                 exc_info=True
@@ -832,7 +867,7 @@ class BookingHistoryRepository:
         cur = self.conn.cursor()
         if limit:
             cur.execute(
-                """SELECT id, event_time, event_type, booking_id, vendor_id, user, summary, details
+                """SELECT id, event_time, event_type, booking_id, vendor_id, "user", summary, details
                    FROM booking_history
                    ORDER BY id DESC, event_time DESC
                    LIMIT ?""",
@@ -840,7 +875,7 @@ class BookingHistoryRepository:
             )
         else:
             cur.execute(
-                """SELECT id, event_time, event_type, booking_id, vendor_id, user, summary, details
+                """SELECT id, event_time, event_type, booking_id, vendor_id, "user", summary, details
                    FROM booking_history
                    ORDER BY id DESC, event_time DESC"""
             )
@@ -863,7 +898,7 @@ class BookingHistoryRepository:
 class UserRepository:
     """Repository for user account data access."""
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: DBConnection):
         self.conn = conn
         self.logger = logging.getLogger(self.__class__.__name__)
 
@@ -943,11 +978,41 @@ class UserRepository:
         cur = self.conn.cursor()
         cur.execute(
             """INSERT INTO users (username, password_hash, role, is_active, created_at)
-               VALUES (?, ?, ?, ?, datetime('now'))""",
-            (username, password_hash, role, 1 if is_active else 0)
+               VALUES (?, ?, ?, ?, ?)
+               RETURNING id""",
+            (username, password_hash, role, 1 if is_active else 0, now_dt_str())
         )
+        user_id = cur.fetchone()[0]
         self.conn.commit()
-        return int(cur.lastrowid)
+        return int(user_id)
+
+    def save(self, user: User | Dict[str, Any]) -> int:
+        payload = user if isinstance(user, dict) else user.__dict__
+        username = str(payload["username"])
+        password_hash = str(payload["password_hash"])
+        role = str(payload["role"])
+        is_active = 1 if bool(payload.get("is_active", True)) else 0
+        created_at = str(payload.get("created_at") or now_dt_str())
+        last_login = payload.get("last_login")
+
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO users (username, password_hash, role, is_active, created_at, last_login)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (username)
+            DO UPDATE SET
+                password_hash = EXCLUDED.password_hash,
+                role = EXCLUDED.role,
+                is_active = EXCLUDED.is_active,
+                last_login = EXCLUDED.last_login
+            RETURNING id
+            """,
+            (username, password_hash, role, is_active, created_at, last_login),
+        )
+        user_id = cur.fetchone()[0]
+        self.conn.commit()
+        return int(user_id)
 
     def list_permission_overrides(self, user_id: int) -> Dict[str, bool]:
         cur = self.conn.cursor()
@@ -1043,7 +1108,7 @@ class UserRepository:
 
     def update_last_login(self, user_id: int) -> None:
         cur = self.conn.cursor()
-        cur.execute("UPDATE users SET last_login = datetime('now') WHERE id = ?", (user_id,))
+        cur.execute("UPDATE users SET last_login = ? WHERE id = ?", (now_dt_str(), user_id))
         self.conn.commit()
 
     def delete_user(self, user_id: int) -> None:
@@ -1055,7 +1120,7 @@ class UserRepository:
 class SessionRepository:
     """Repository for server-side session storage."""
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: DBConnection):
         self.conn = conn
         self.logger = logging.getLogger(self.__class__.__name__)
 
@@ -1126,14 +1191,19 @@ class SessionRepository:
 class RevokedTokenRepository:
     """Repository for revoked JWT tracking."""
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: DBConnection):
         self.conn = conn
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def revoke(self, jti: str, expires_at: int) -> None:
         cur = self.conn.cursor()
         cur.execute(
-            "INSERT OR REPLACE INTO revoked_tokens (jti, expires_at) VALUES (?, ?)",
+            """
+            INSERT INTO revoked_tokens (jti, expires_at)
+            VALUES (?, ?)
+            ON CONFLICT (jti)
+            DO UPDATE SET expires_at = EXCLUDED.expires_at
+            """,
             (jti, expires_at),
         )
         self.conn.commit()

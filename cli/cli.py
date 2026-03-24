@@ -2,7 +2,8 @@
 Command-line interface for the Generator Booking Ledger.
 """
 
-import sqlite3
+from __future__ import annotations
+
 import pandas as pd
 import logging
 import re
@@ -18,6 +19,7 @@ from core import (
 )
 from core.services import archive_all_bookings, create_vendor
 from config import (
+    DATABASE_URL,
     LOAD_SEED_DATA,
     OWNER_USERNAME,
     OWNER_PASSWORD,
@@ -27,14 +29,17 @@ from config import (
     GEN_INVENTORY_EMERGENCY,
 )
 from core.auth import ensure_owner_user
+from core.database import redact_database_url
+from core.observability import DBConnection
+from core.utils import query_to_dataframe
 
 
 class CLI:
     """Command-line interface for the booking system."""
     
-    def __init__(self, db_path: str = "ledger.db"):
-        self.db_manager = DatabaseManager(db_path)
-        self.conn: Optional[sqlite3.Connection] = None
+    def __init__(self, database_url: Optional[str] = None):
+        self.db_manager = DatabaseManager(database_url or DATABASE_URL)
+        self.conn: Optional[DBConnection] = None
         self.booking_service: Optional[BookingService] = None
         self.export_service: Optional[ExportService] = None
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -60,7 +65,10 @@ class CLI:
         self.actor = "cli"
         
         self.logger.info("System initialized successfully")
-        print(f"Generator Booking Ledger initialized. Database: {self.db_manager.db_path}")
+        print(
+            "Generator Booking Ledger initialized. "
+            f"Database: {redact_database_url(self.db_manager.database_url)}"
+        )
     
     def print_table(self, table: str) -> None:
         """Print a database table."""
@@ -73,7 +81,7 @@ class CLI:
             return
 
         try:
-            df = pd.read_sql_query(f"SELECT * FROM {table}", self.conn)
+            df = query_to_dataframe(self.conn, f"SELECT * FROM {table}")
             print(f"\n{table.upper()}:")
             print(df.to_string(index=False))
         except Exception as e:
@@ -133,8 +141,8 @@ class CLI:
                         
                         # Show current booking count
                         try:
-                            bookings_df = pd.read_sql_query("SELECT COUNT(*) as count FROM bookings", self.conn)
-                            items_df = pd.read_sql_query("SELECT COUNT(*) as count FROM booking_items", self.conn)
+                            bookings_df = query_to_dataframe(self.conn, "SELECT COUNT(*) as count FROM bookings")
+                            items_df = query_to_dataframe(self.conn, "SELECT COUNT(*) as count FROM booking_items")
                             
                             booking_count = bookings_df['count'].iloc[0]
                             item_count = items_df['count'].iloc[0]
