@@ -12,11 +12,26 @@ Starting with `2.2.0`, entries are maintained as active release documentation.
 
 ## [Unreleased]
 
-- No unreleased changes documented after `4.0.0` yet.
+- No unreleased changes documented after `4.0.1` yet.
+
+## [4.0.1]
+
+Status: current repository state / next deployment target  
+Basis: Docker build hardening follow-up after `4.0.0`
+
+### Changed
+
+- Reworked the app image into a multi-stage Docker build so native build dependencies stay in the builder stage while the runtime image remains slimmer.
+- Narrowed Docker `COPY` inputs to the application code and packaging files required for the image build.
+
+### Fixed
+
+- Fresh Docker builds now tolerate future dependencies that need native compilation by installing toolchain and PostgreSQL client headers in the builder stage.
+- Docker build context now excludes local secrets, SQLite backups, exported data, logs, and tests so they are not accidentally baked into release images.
 
 ## [4.0.0]
 
-Status: current repository state / next deployment target  
+Status: documented local release baseline / previous deployment target  
 Basis: PostgreSQL cutover working tree after `3.1.1`
 
 ### Added

@@ -13,7 +13,7 @@ The project has grown beyond a simple booking tracker. In its current form it su
 - audit-style booking history and role-based administration
 - browser sessions, JWT login for APIs, CSRF protection, and transport-security controls
 
-Current version: `4.0.0`
+Current version: `4.0.1`
 
 ## Business Model
 
@@ -281,7 +281,7 @@ By default:
 - the app derives its PostgreSQL connection from `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME`
 - `Data/`, `exported_data/`, and `archives/` are mounted into the container
 
-The compose file expects `APP_IMAGE_TAG` in `.env`, which is currently `v4.0.0`.
+The compose file expects `APP_IMAGE_TAG` in `.env`, which is currently `v4.0.1`.
 
 Open the app at `http://127.0.0.1:8001/login` when running with the default compose port mapping.
 

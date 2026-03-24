@@ -37,9 +37,14 @@ These inferred versions are suitable for documentation and future reference, but
   Meaning: runtime file logging now writes to a dedicated `logs/` folder instead of the repository root.
 
 - `v4.0.0`
+  Status: documented local release baseline / previous deployment target
+  Environment: local repository / previous deployment target
+  Meaning: PostgreSQL-only runtime, Alembic schema management, and SQLite-to-PostgreSQL cutover tooling.
+
+- `v4.0.1`
   Status: current repository version / next deployment target
   Environment: local repository / next deployment target
-  Meaning: PostgreSQL-only runtime, Alembic schema management, and SQLite-to-PostgreSQL cutover tooling.
+  Meaning: Docker build hardening with a multi-stage image and tighter Docker build context exclusions.
 
 ## Inferred Release Timeline
 
@@ -55,7 +60,8 @@ These inferred versions are suitable for documentation and future reference, but
 | `3.0.0` | Documented local release baseline | `7c91444` release commit | Local repo / previous `Pre-prod` target | Explicit `APP_IMAGE_TAG` requirement in Compose plus versioned Docker release examples |
 | `3.1.0` | Documented local release baseline | `b3a24eb` release commit | Local repo / previous `Pre-prod` target | Permanent Genset inventory, rental-vendor assignment on generators, generator update flow, and booking exclusion for permanently parked stock |
 | `3.1.1` | Documented local release baseline | Post-`98a413c` working tree | Local repo / previous `Pre-prod` target | Runtime file logging now writes to a dedicated `logs/` folder instead of the repository root |
-| `4.0.0` | Current repo version | PostgreSQL cutover working tree | Local repo / next `Pre-prod` release | PostgreSQL-only runtime, Alembic schema management, split DB env config, and SQLite-to-PostgreSQL migration tooling |
+| `4.0.0` | Documented local release baseline | PostgreSQL cutover working tree | Local repo / previous `Pre-prod` target | PostgreSQL-only runtime, Alembic schema management, split DB env config, and SQLite-to-PostgreSQL migration tooling |
+| `4.0.1` | Current repo version | Docker hardening follow-up working tree | Local repo / next `Pre-prod` release | Multi-stage Docker build, builder-stage native dependencies, and tighter `.dockerignore` exclusions for safer release images |
 
 ## Note On `2.0.1`
 
@@ -130,7 +136,7 @@ Starting point from now on:
 
 - Treat the currently running server Docker app as `v2.0.0`.
 - Treat the most recent tagged local release as `v2.2.0`.
-- Treat the current repository state as `v4.0.0`.
+- Treat the current repository state as `v4.0.1`.
 - Keep future release notes in [CHANGELOG.md](/home/aatish/app/genset/CHANGELOG.md).
 - Only add a retrospective version entry when you have either:
   - a clear commit milestone, or
