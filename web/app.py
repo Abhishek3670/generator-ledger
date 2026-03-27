@@ -102,6 +102,8 @@ from config import (
     HOST,
     PORT,
     DEBUG,
+    CORS_ALLOWED_ORIGINS,
+    CORS_ALLOWED_ORIGIN_REGEX,
     LOAD_SEED_DATA,
     SESSION_SECRET,
     SESSION_COOKIE_NAME,
@@ -392,10 +394,8 @@ class LoginRequest(BaseModel):
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8082",
-        "http://127.0.0.1:8082",
-    ],
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_origin_regex=CORS_ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
