@@ -5,6 +5,7 @@ FastAPI web application for Generator Booking Ledger.
 from __future__ import annotations
 
 from fastapi import FastAPI, Request, HTTPException, Form, Depends, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -20,7 +21,7 @@ from typing import Optional, List, Dict, Any, Tuple
 import logging
 import re
 import hashlib
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 import jwt
 try:
     import psutil
@@ -389,6 +390,16 @@ class LoginRequest(BaseModel):
 
 # FastAPI app
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8082",
+        "http://127.0.0.1:8082",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Rate limiter configuration
 limiter = Limiter(key_func=get_remote_address)
@@ -1166,6 +1177,9 @@ async def security_headers_middleware(request: Request, call_next):
 @app.middleware("http")
 async def db_auth_middleware(request: Request, call_next):
     """Attach DB connection and enforce authentication for protected routes."""
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     conn: Optional[DBConnection] = None
     response: Optional[JSONResponse | RedirectResponse | HTMLResponse] = None
     clear_cookie = False
@@ -1519,10 +1533,29 @@ async def login(
 @limiter.limit("5/minute")
 async def api_login(
     request: Request,
-    payload: LoginRequest,
     conn: DBConnection = Depends(get_db)
 ):
     """API login: issue JWT token."""
+    try:
+        raw_payload = await request.json()
+    except (ValueError, RuntimeError):  # JSONDecodeError inherits from ValueError
+        logger.warning("Failed to parse JSON payload in API login request", exc_info=False)
+        return JSONResponse(status_code=400, content={"detail": "Invalid JSON payload"})
+
+    try:
+        payload = LoginRequest.model_validate(raw_payload)
+    except ValidationError as exc:
+        errors = []
+        for error in exc.errors():
+            location = ".".join(str(x) for x in error.get("loc", ()))
+            if location:
+                errors.append(f"{location}: {error['msg']}")
+            else:
+                errors.append(error["msg"])
+        error_message = "; ".join(errors) if errors else "Validation error"
+        logger.warning(f"Validation error: {error_message}")
+        return JSONResponse(status_code=400, content={"detail": error_message})
+
     user = authenticate_credentials(conn, payload.username, payload.password)
     if not user:
         return JSONResponse(status_code=401, content={"detail": "Invalid username or password"})
