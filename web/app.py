@@ -392,14 +392,6 @@ class LoginRequest(BaseModel):
 
 # FastAPI app
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ALLOWED_ORIGINS,
-    allow_origin_regex=CORS_ALLOWED_ORIGIN_REGEX,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Rate limiter configuration
 limiter = Limiter(key_func=get_remote_address)
@@ -1240,6 +1232,16 @@ async def db_auth_middleware(request: Request, call_next):
         end_request_observation(observation_tokens)
         if conn:
             conn.close()
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_origin_regex=CORS_ALLOWED_ORIGIN_REGEX,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def initialize_app():
