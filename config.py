@@ -17,6 +17,10 @@ def _normalize_toggle_setting(value: str, default: str = "auto") -> str:
         return "false"
     return "auto"
 
+
+def _parse_csv_setting(value: str) -> list[str]:
+    return [item.strip() for item in (value or "").split(",") if item.strip()]
+
 # Load environment variables from .env file if it exists
 try:
     from dotenv import load_dotenv
@@ -89,6 +93,19 @@ ROLE_OPERATOR = "operator"
 HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "8000"))
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+CORS_ALLOWED_ORIGINS = _parse_csv_setting(
+    os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:8082,http://127.0.0.1:8082",
+    )
+)
+CORS_ALLOWED_ORIGIN_REGEX = (
+    os.getenv(
+        "CORS_ALLOWED_ORIGIN_REGEX",
+        r"^https?://(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$",
+    ).strip()
+    or None
+)
 
 # Application Configuration
 APP_TITLE = "Generator Booking Ledger"
