@@ -78,3 +78,12 @@ MD _folder
 !VERSIONING.md
 *.txt
 ATOMIC_DOCKER_DEPLOYMENT.md
+
+
+# Graphify content
+graphify-out/
+
+# Codex Agent file
+.codex
+AGENTS.md
+
