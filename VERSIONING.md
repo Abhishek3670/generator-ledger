@@ -42,9 +42,14 @@ These inferred versions are suitable for documentation and future reference, but
   Meaning: PostgreSQL-only runtime, Alembic schema management, and SQLite-to-PostgreSQL cutover tooling.
 
 - `v4.0.1`
+  Status: documented local release baseline / previous deployment target
+  Environment: local repository / previous deployment target
+  Meaning: Docker build hardening with a multi-stage image and tighter Docker build context exclusions.
+
+- `v4.0.2`
   Status: current repository version / next deployment target
   Environment: local repository / next deployment target
-  Meaning: Docker build hardening with a multi-stage image and tighter Docker build context exclusions.
+  Meaning: Improved reliability for high-latency database connections, migration version caching to skip redundant upgrade checks, and fix for duplicate logging.
 
 ## Inferred Release Timeline
 
@@ -61,7 +66,8 @@ These inferred versions are suitable for documentation and future reference, but
 | `3.1.0` | Documented local release baseline | `b3a24eb` release commit | Local repo / previous `Pre-prod` target | Permanent Genset inventory, rental-vendor assignment on generators, generator update flow, and booking exclusion for permanently parked stock |
 | `3.1.1` | Documented local release baseline | Post-`98a413c` working tree | Local repo / previous `Pre-prod` target | Runtime file logging now writes to a dedicated `logs/` folder instead of the repository root |
 | `4.0.0` | Documented local release baseline | PostgreSQL cutover working tree | Local repo / previous `Pre-prod` target | PostgreSQL-only runtime, Alembic schema management, split DB env config, and SQLite-to-PostgreSQL migration tooling |
-| `4.0.1` | Current repo version | Docker hardening follow-up working tree | Local repo / next `Pre-prod` release | Multi-stage Docker build, builder-stage native dependencies, and tighter `.dockerignore` exclusions for safer release images |
+| `4.0.1` | Documented local release baseline | Docker hardening follow-up working tree | Local repo / previous `Pre-prod` target | Multi-stage Docker build, builder-stage native dependencies, and tighter `.dockerignore` exclusions for safer release images |
+| `4.0.2` | Current repo version | Reliability and diagnostic working tree | Local repo / next `Pre-prod` release | Migration version pre-check to skip redundant hangs, terminal error diagnostics for DB timeout, NullPool configuration for Alembic, and fix for duplicate logging |
 
 ## Note On `2.0.1`
 

@@ -8,10 +8,14 @@ from sqlalchemy import create_engine, pool
 
 from config import DATABASE_URL as CONFIG_DATABASE_URL
 
+import logging
 config = context.config
 
-if config.config_file_name is not None:
+# Interpret the config file for Python logging.
+# This line sets up loggers basically.
+if config.config_file_name is not None and not logging.getLogger().handlers:
     fileConfig(config.config_file_name)
+    print(f"[ALEMBIC DEBUG] Logging configured via {config.config_file_name}")
 
 target_metadata = None
 
@@ -46,14 +50,27 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    """Run migrations in 'online' mode."""
     url = _get_sqlalchemy_database_url()
+    print(f"[ALEMBIC DEBUG] Creating engine for {url.split('@')[-1]}")
+    
+    # Use NullPool to prevent dangling connections in this high-latency environment
     connectable = create_engine(url, poolclass=pool.NullPool)
 
+    print("[ALEMBIC DEBUG] Attempting to connect...")
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        print("[ALEMBIC DEBUG] Connection established. Configuring context...")
+        context.configure(
+            connection=connection, 
+            target_metadata=target_metadata,
+            compare_type=True
+        )
 
+        print("[ALEMBIC DEBUG] Starting transaction...")
         with context.begin_transaction():
+            print("[ALEMBIC DEBUG] Running migrations...")
             context.run_migrations()
+            print("[ALEMBIC DEBUG] Migrations finished.")
 
 
 if context.is_offline_mode():

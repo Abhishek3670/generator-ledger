@@ -12,7 +12,27 @@ Starting with `2.2.0`, entries are maintained as active release documentation.
 
 ## [Unreleased]
 
-- No unreleased changes documented after `4.0.1` yet.
+- No unreleased changes documented after `4.0.2` yet.
+
+## [4.0.2]
+
+Status: current repository state / next deployment target  
+Basis: Reliability and diagnostic follow-up after `4.0.1`
+
+### Added
+
+- Human-readable terminal diagnostic messages for database connection failures during startup, including a troubleshooting checklist.
+- Explicit instrumentation logs for database migration progress (`[ALEMBIC DEBUG]`) to visibility into startup lifecycle events.
+
+### Changed
+
+- Transitioned SQLAlchemy/Alembic pools to `NullPool` during migrations to ensure no idling connections remain open in degraded network environments.
+- Optimized the application startup sequence by pre-checking the database version; redundant Alembic upgrade checks are now skipped if the schema is already current.
+
+### Fixed
+
+- Resolved duplicate logging entries by guarding the Alembic `fileConfig` initialization.
+- Mitigated application startup hangs on high-latency or unstable database networks.
 
 ## [4.0.1]
 

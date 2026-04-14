@@ -88,10 +88,43 @@ class DatabaseManager:
 
     def init_schema(self) -> None:
         """Apply Alembic migrations to the target database."""
+        self.logger.info("Initializing schema (applying migrations if needed)...")
+        
+        # 1. Quick check: Is migration even needed?
+        current_revision = None
+        try:
+            self.logger.info("Checking current migration version...")
+            conn = self.connect()
+            cur = conn.cursor()
+            cur.execute("SELECT version_num FROM alembic_version")
+            row = cur.fetchone()
+            if row:
+                current_revision = row[0]
+            conn.close()
+            self.logger.info(f"Current database version: {current_revision}")
+        except Exception as e:
+            self.logger.info(f"Could not check version (maybe table doesn't exist): {e}")
+
+        # Note: In this project, the latest version is '20260323_0001'
+        if current_revision == '20260323_0001':
+            self.logger.info("Database is already at latest version. Skipping Alembic upgrade.")
+            return
+
+        # 2. Run Alembic upgrade if needed or if version check failed
         cfg = Config(str(self._alembic_ini_path()))
         cfg.attributes["database_url"] = self.database_url
         cfg.attributes["configure_logger"] = False
-        command.upgrade(cfg, "head")
+        
+        self.logger.info("Starting alembic upgrade head...")
+        started = time.perf_counter()
+        try:
+            command.upgrade(cfg, "head")
+            duration = time.perf_counter() - started
+            self.logger.info(f"Alembic upgrade completed in {duration:.2f}s.")
+        except Exception as e:
+            self.logger.error(f"Alembic upgrade failed: {e}")
+            raise
+
         self.logger.info(
             "Database migrations applied | context=%s",
             {"database_url": self.redacted_url},

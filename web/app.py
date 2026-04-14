@@ -1246,9 +1246,42 @@ app.add_middleware(
 
 def initialize_app():
     """Initialize database and services."""
+    import sys
+    from config import DB_HOST, DB_PORT, DB_NAME
+
     db_manager = DatabaseManager(DATABASE_URL)
-    db_manager.init_schema()
-    conn = db_manager.connect()
+
+    try:
+        db_manager.init_schema()
+        conn = db_manager.connect()
+    except Exception as exc:
+        _host = DB_HOST
+        _port = DB_PORT
+        _db   = DB_NAME
+        border = "=" * 68
+        msg = (
+            f"\n{border}\n"
+            f"  DATABASE CONNECTION FAILED — startup aborted\n"
+            f"{border}\n"
+            f"  Host : {_host}\n"
+            f"  Port : {_port}\n"
+            f"  DB   : {_db}\n"
+            f"  Error: {exc}\n"
+            f"{border}\n"
+            f"  Checklist:\n"
+            f"    1. Is the PostgreSQL server running on {_host}:{_port}?\n"
+            f"    2. Is this machine on the same network / VPN?\n"
+            f"       (try: nc -zv {_host} {_port})\n"
+            f"    3. Are DB_HOST / DB_PORT / DB_USER / DB_PASSWORD correct\n"
+            f"       in your .env file?\n"
+            f"{border}\n"
+        )
+        print(msg, file=sys.stderr)
+        logger.critical(
+            "Startup failed: cannot reach database at %s:%s — %s",
+            _host, _port, exc,
+        )
+        raise
 
     ensure_owner_user(conn, OWNER_USERNAME, OWNER_PASSWORD, strict=True)
 
@@ -1317,7 +1350,13 @@ def _summarize_booking_items(items: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 @app.on_event("startup")
 async def startup():
-    initialize_app()
+    import sys
+    try:
+        initialize_app()
+    except Exception:
+        # Error already printed inside initialize_app(); re-raise so uvicorn
+        # exits cleanly instead of swallowing the exception silently.
+        sys.exit(3)
 
 
 @app.on_event("shutdown")

@@ -109,7 +109,7 @@ CORS_ALLOWED_ORIGIN_REGEX = (
 
 # Application Configuration
 APP_TITLE = "Generator Booking Ledger"
-APP_VERSION = "4.0.1"
+APP_VERSION = "4.0.2"
 LOG_DIR = os.getenv("LOG_DIR", "logs").strip() or "logs"
 LOG_FILE = os.path.join(LOG_DIR, "application.log")
 

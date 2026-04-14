@@ -87,3 +87,12 @@ graphify-out/
 .codex
 AGENTS.md
 
+QUERIES/pending/
+QUERIES/responses/
+
+AGENTS
+PROMPTS
+
+# Assets and Backups
+asset/
+*.dump
