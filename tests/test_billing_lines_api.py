@@ -174,7 +174,7 @@ def test_billing_lines_filters_confirmed_only_and_range_inclusive(app_module_and
             row["vendor_id"],
             row["vendor_name"],
             row["booking_id"],
-            row["booked_date"],
+            str(row["booked_date"]),
             row["generator_id"],
             row["capacity_kva"],
             row["inventory_type"],
