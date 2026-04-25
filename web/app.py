@@ -1454,22 +1454,66 @@ async def shutdown():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Health check endpoint with database connectivity verification.
+
+    Returns 200 with structured health payload when everything is operational.
+    Returns 503 with error detail when the database is unreachable.
+    """
+    db_status = "connected"
+    db_latency_ms = None
+    db_error = None
+    pool_stats = None
+
     try:
+        t0 = time.perf_counter()
         conn = _new_db_connection()
         try:
             conn.execute("SELECT 1")
+            db_latency_ms = round((time.perf_counter() - t0) * 1000, 2)
         finally:
             conn.close()
-    except Exception:
+    except Exception as exc:
+        db_status = "unavailable"
+        db_error = str(exc)
+        db_latency_ms = None
         logger.error("Health check database ping failed", exc_info=True)
-        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    # Collect connection pool statistics if available
+    if db_pool is not None:
+        try:
+            stats = db_pool.get_stats()
+            pool_stats = {
+                "pool_size": stats.get("pool_size"),
+                "pool_available": stats.get("pool_available"),
+                "requests_waiting": stats.get("requests_waiting"),
+            }
+        except Exception:
+            pool_stats = None
+
+    if db_status != "connected":
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "app": APP_TITLE,
+                "version": APP_VERSION,
+                "database": {
+                    "status": db_status,
+                    "error": db_error,
+                },
+            },
+        )
 
     return {
         "status": "healthy",
         "app": APP_TITLE,
         "version": APP_VERSION,
-        "database": "postgresql",
+        "database": {
+            "status": db_status,
+            "type": "postgresql",
+            "latency_ms": db_latency_ms,
+            "pool": pool_stats,
+        },
     }
 
 

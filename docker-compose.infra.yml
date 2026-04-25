@@ -1,0 +1,56 @@
+# =============================================================================
+# docker-compose.infra.yml — Production Infrastructure (Declarative)
+# =============================================================================
+#
+# This file defines the production deployment of the Generator Booking Ledger
+# web application. It replaces the manually-created `docker run` commands
+# with reproducible, declarative infrastructure-as-code.
+#
+# SAFETY: This connects to the PRODUCTION database on 192.168.29.71.
+#         Do NOT use this for testing. See SAFETY.md.
+#
+# Usage:
+#   docker compose -f docker-compose.infra.yml up -d
+#   docker compose -f docker-compose.infra.yml logs -f
+#   docker compose -f docker-compose.infra.yml down
+#
+# Secrets:
+#   All sensitive values are read from .env (gitignored).
+#   See .env.example for required variables.
+# =============================================================================
+
+services:
+  web:
+    image: generator-ledger:${APP_IMAGE_TAG:-latest}
+    container_name: generator-ledger-web
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env
+    environment:
+      # Non-secret overrides (safe to commit)
+      HOST: "127.0.0.1"
+      PORT: "8000"
+      LOAD_SEED_DATA: "false"
+      DEBUG: "false"
+      PGSSLMODE: "disable"
+    volumes:
+      - ./Data:/app/Data:rw
+      - ./exported_data:/app/exported_data:rw
+      - ./archives:/app/archives:rw
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
