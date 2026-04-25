@@ -96,3 +96,4 @@ PROMPTS
 # Assets and Backups
 asset/
 *.dump
+SAFETY.md

@@ -74,6 +74,7 @@ from core.auth import (
     generate_session_id,
     generate_csrf_token,
     create_access_token,
+    create_refresh_token,
     decode_access_token,
 )
 from core.permissions import (
@@ -112,6 +113,7 @@ from config import (
     JWT_SECRET,
     JWT_ALGORITHM,
     JWT_EXPIRE_MINUTES,
+    JWT_REFRESH_EXPIRE_MINUTES,
     CSRF_HEADER_NAME,
     ENABLE_HSTS,
     OWNER_USERNAME,
@@ -390,6 +392,10 @@ class LoginRequest(BaseModel):
             raise ValueError('Password too long (bcrypt limit is 72 chars)')
         return v
 
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=1)
+
 # FastAPI app
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
 
@@ -409,6 +415,8 @@ if not JWT_SECRET:
 PUBLIC_PATHS = {
     "/login",
     "/api/login",
+    "/auth/refresh",
+    "/api/auth/refresh",
     "/health",
     "/api/info",
     "/docs",
@@ -420,6 +428,8 @@ PUBLIC_PREFIXES = ("/static",)
 CSRF_EXEMPT_PATHS = {
     "/login",
     "/api/login",
+    "/auth/refresh",
+    "/api/auth/refresh",
     "/health",
 }
 ALLOWED_ROLES = {ROLE_ADMIN, ROLE_OPERATOR}
@@ -799,6 +809,16 @@ def get_bearer_token(request: Request) -> Optional[str]:
     return parts[1].strip() or None
 
 
+def _validate_access_token_payload(
+    payload: Dict[str, Any],
+    request: Request,
+) -> Optional[JSONResponse | RedirectResponse]:
+    token_type = payload.get("type", "access")
+    if token_type != "access":
+        return unauthorized_response(request, detail="Invalid token")
+    return None
+
+
 async def validate_csrf(request: Request, expected_token: str) -> bool:
     """Validate CSRF token from header or form body."""
     header_token = (
@@ -887,6 +907,53 @@ def create_session(
         user_agent=request.headers.get("user-agent", ""),
     )
     return session_id, csrf_token, expires_at
+
+
+def _issue_api_token_pair(user: Any) -> Dict[str, Any]:
+    access_token, access_exp_ts, _access_jti = create_access_token(
+        user_id=user.id,
+        username=user.username,
+        role=user.role,
+        secret=JWT_SECRET,
+        algorithm=JWT_ALGORITHM,
+        expires_minutes=JWT_EXPIRE_MINUTES,
+    )
+    refresh_token, refresh_exp_ts, _refresh_jti = create_refresh_token(
+        user_id=user.id,
+        username=user.username,
+        role=user.role,
+        secret=JWT_SECRET,
+        algorithm=JWT_ALGORITHM,
+        expires_minutes=JWT_REFRESH_EXPIRE_MINUTES,
+    )
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": max(0, access_exp_ts - now_ts()),
+        "refresh_expires_in": max(0, refresh_exp_ts - now_ts()),
+        "user": {"id": user.id, "username": user.username, "role": user.role},
+    }
+
+
+def _prevalidate_bearer_token(
+    request: Request,
+) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse | RedirectResponse]]:
+    token = get_bearer_token(request)
+    if not token:
+        return None, None
+
+    try:
+        payload = decode_access_token(token, JWT_SECRET, JWT_ALGORITHM, verify_exp=True)
+    except jwt.ExpiredSignatureError:
+        return None, unauthorized_response(request, detail="Token expired")
+    except jwt.PyJWTError:
+        return None, unauthorized_response(request, detail="Invalid token")
+
+    auth_error = _validate_access_token_payload(payload, request)
+    if auth_error:
+        return None, auth_error
+    return payload, None
 
 
 def _request_uses_https(request: Optional[Request]) -> bool:
@@ -1065,7 +1132,8 @@ def _delete_session_cookie(response: Any, request: Optional[Request] = None) -> 
 
 def _authenticate_with_bearer_token(
     request: Request,
-    conn: DBConnection
+    conn: DBConnection,
+    token_payload: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse | RedirectResponse]]:
     auth_header = request.headers.get("authorization")
     if not auth_header:
@@ -1075,12 +1143,18 @@ def _authenticate_with_bearer_token(
     if not token:
         return None, unauthorized_response(request)
 
-    try:
-        payload = decode_access_token(token, JWT_SECRET, JWT_ALGORITHM, verify_exp=True)
-    except jwt.ExpiredSignatureError:
-        return None, unauthorized_response(request, detail="Token expired")
-    except jwt.PyJWTError:
-        return None, unauthorized_response(request, detail="Invalid token")
+    payload = token_payload
+    if payload is None:
+        try:
+            payload = decode_access_token(token, JWT_SECRET, JWT_ALGORITHM, verify_exp=True)
+        except jwt.ExpiredSignatureError:
+            return None, unauthorized_response(request, detail="Token expired")
+        except jwt.PyJWTError:
+            return None, unauthorized_response(request, detail="Invalid token")
+
+    auth_error = _validate_access_token_payload(payload, request)
+    if auth_error:
+        return None, auth_error
 
     jti = payload.get("jti")
     if not jti:
@@ -1179,13 +1253,23 @@ async def db_auth_middleware(request: Request, call_next):
     request_started = time.perf_counter()
     observation_tokens = begin_request_observation(f"{request.method} {path}")
     try:
-        conn = _new_db_connection()
-        request.state.db = conn
         _initialize_auth_state(request)
 
         is_public = path in PUBLIC_PATHS or any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES)
 
-        jwt_auth_state, auth_error = _authenticate_with_bearer_token(request, conn)
+        prevalidated_token_payload, auth_error = _prevalidate_bearer_token(request)
+        if auth_error:
+            response = auth_error
+            return response
+
+        conn = _new_db_connection()
+        request.state.db = conn
+
+        jwt_auth_state, auth_error = _authenticate_with_bearer_token(
+            request,
+            conn,
+            token_payload=prevalidated_token_payload,
+        )
         if auth_error:
             response = auth_error
             return response
@@ -1546,22 +1630,9 @@ async def login(
     repo.update_last_login(user.id)
 
     if is_api_request(request) or is_json:
-        token, exp_ts, _jti = create_access_token(
-            user_id=user.id,
-            username=user.username,
-            role=user.role,
-            secret=JWT_SECRET,
-            algorithm=JWT_ALGORITHM,
-            expires_minutes=JWT_EXPIRE_MINUTES,
-        )
         return JSONResponse(
             status_code=200,
-            content={
-                "access_token": token,
-                "token_type": "bearer",
-                "expires_in": max(0, exp_ts - now_ts()),
-                "user": {"id": user.id, "username": user.username, "role": user.role},
-            },
+            content=_issue_api_token_pair(user),
         )
 
     session_id, _csrf_token, expires_at = create_session(conn, user.id, request)
@@ -1604,23 +1675,75 @@ async def api_login(
     repo = UserRepository(conn)
     repo.update_last_login(user.id)
 
-    token, exp_ts, _jti = create_access_token(
-        user_id=user.id,
-        username=user.username,
-        role=user.role,
-        secret=JWT_SECRET,
-        algorithm=JWT_ALGORITHM,
-        expires_minutes=JWT_EXPIRE_MINUTES,
-    )
     return JSONResponse(
         status_code=200,
-        content={
-            "access_token": token,
-            "token_type": "bearer",
-            "expires_in": max(0, exp_ts - now_ts()),
-            "user": {"id": user.id, "username": user.username, "role": user.role},
-        },
+        content=_issue_api_token_pair(user),
     )
+
+
+@app.post("/auth/refresh")
+@app.post("/api/auth/refresh")
+async def refresh_access_token(
+    request: Request,
+    conn: DBConnection = Depends(get_db),
+):
+    """Refresh an access token using a valid refresh token."""
+    try:
+        raw_payload = await request.json()
+    except (ValueError, RuntimeError):
+        logger.warning("Failed to parse JSON payload in refresh request", exc_info=False)
+        return JSONResponse(status_code=400, content={"detail": "Invalid JSON payload"})
+
+    try:
+        payload = RefreshTokenRequest.model_validate(raw_payload)
+    except ValidationError as exc:
+        errors = []
+        for error in exc.errors():
+            location = ".".join(str(x) for x in error.get("loc", ()))
+            if location:
+                errors.append(f"{location}: {error['msg']}")
+            else:
+                errors.append(error["msg"])
+        error_message = "; ".join(errors) if errors else "Validation error"
+        return JSONResponse(status_code=400, content={"detail": error_message})
+
+    try:
+        refresh_payload = decode_access_token(
+            payload.refresh_token,
+            JWT_SECRET,
+            JWT_ALGORITHM,
+            verify_exp=True,
+        )
+    except jwt.ExpiredSignatureError:
+        return JSONResponse(status_code=401, content={"detail": "Refresh token expired"})
+    except jwt.PyJWTError:
+        return JSONResponse(status_code=401, content={"detail": "Invalid refresh token"})
+
+    if refresh_payload.get("type") != "refresh":
+        return JSONResponse(status_code=401, content={"detail": "Invalid refresh token"})
+
+    jti = refresh_payload.get("jti")
+    exp = refresh_payload.get("exp")
+    if not jti:
+        return JSONResponse(status_code=401, content={"detail": "Invalid refresh token"})
+
+    revoked_repo = RevokedTokenRepository(conn)
+    if revoked_repo.is_revoked(jti, now_ts()):
+        return JSONResponse(status_code=401, content={"detail": "Refresh token revoked"})
+
+    try:
+        user_id = int(refresh_payload.get("sub"))
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=401, content={"detail": "Invalid refresh token"})
+
+    user = UserRepository(conn).get_by_id(user_id)
+    if not user or not user.is_active:
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+    if exp and int(exp) > now_ts():
+        revoked_repo.revoke(jti, int(exp))
+
+    return JSONResponse(status_code=200, content=_issue_api_token_pair(user))
 
 
 @app.get("/logout")
@@ -1636,6 +1759,14 @@ async def logout(request: Request, conn: DBConnection = Depends(get_db)):
 @app.post("/api/logout")
 async def api_logout(request: Request, conn: DBConnection = Depends(get_db)):
     """API logout: revoke JWT or clear session."""
+    refresh_token = None
+    if "application/json" in request.headers.get("content-type", "").lower():
+        try:
+            payload = await request.json()
+        except (ValueError, RuntimeError):
+            payload = {}
+        refresh_token = payload.get("refresh_token")
+
     if request.state.auth_type == "jwt":
         token = get_bearer_token(request)
         if token:
@@ -1652,6 +1783,22 @@ async def api_logout(request: Request, conn: DBConnection = Depends(get_db)):
                     RevokedTokenRepository(conn).revoke(jti, int(exp))
             except jwt.PyJWTError:
                 pass
+
+    if refresh_token:
+        try:
+            refresh_payload = decode_access_token(
+                refresh_token,
+                JWT_SECRET,
+                JWT_ALGORITHM,
+                verify_exp=False,
+            )
+            if refresh_payload.get("type") == "refresh":
+                jti = refresh_payload.get("jti")
+                exp = refresh_payload.get("exp")
+                if jti and exp and int(exp) > now_ts():
+                    RevokedTokenRepository(conn).revoke(jti, int(exp))
+        except jwt.PyJWTError:
+            pass
 
     if request.state.auth_type == "session" and request.state.session_id:
         SessionRepository(conn).delete(request.state.session_id)

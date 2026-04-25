@@ -93,6 +93,47 @@ def create_access_token(
     expires_minutes: int,
 ) -> Tuple[str, int, str]:
     """Create a signed JWT access token with expiry."""
+    return _create_token(
+        user_id=user_id,
+        username=username,
+        role=role,
+        secret=secret,
+        algorithm=algorithm,
+        expires_minutes=expires_minutes,
+        token_type="access",
+    )
+
+
+def create_refresh_token(
+    user_id: int,
+    username: str,
+    role: str,
+    secret: str,
+    algorithm: str,
+    expires_minutes: int,
+) -> Tuple[str, int, str]:
+    """Create a signed JWT refresh token with expiry."""
+    return _create_token(
+        user_id=user_id,
+        username=username,
+        role=role,
+        secret=secret,
+        algorithm=algorithm,
+        expires_minutes=expires_minutes,
+        token_type="refresh",
+    )
+
+
+def _create_token(
+    user_id: int,
+    username: str,
+    role: str,
+    secret: str,
+    algorithm: str,
+    expires_minutes: int,
+    token_type: str,
+) -> Tuple[str, int, str]:
+    """Create a signed JWT token with expiry and token type."""
     now = datetime.now(timezone.utc)
     exp = now + timedelta(minutes=expires_minutes)
     jti = secrets.token_urlsafe(16)
@@ -100,6 +141,7 @@ def create_access_token(
         "sub": str(user_id),
         "username": username,
         "role": role,
+        "type": token_type,
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
         "jti": jti,

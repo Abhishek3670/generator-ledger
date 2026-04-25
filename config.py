@@ -30,10 +30,10 @@ except ImportError:
 
 
 def _build_database_url() -> str:
-    explicit = (
-        os.getenv("DATABASE_URL", "").strip()
-        or os.getenv("TEST_DATABASE_URL", "").strip()
-    )
+    # SAFETY: Production code NEVER reads TEST_DATABASE_URL.
+    # Test URLs are resolved exclusively by tests/conftest.py.
+    # See SAFETY.md rule S3.
+    explicit = os.getenv("DATABASE_URL", "").strip()
     if explicit:
         return explicit
 
@@ -78,7 +78,8 @@ SESSION_COOKIE_SECURE = _normalize_toggle_setting(
 )
 JWT_SECRET = (os.getenv("JWT_SECRET", "").strip() or SESSION_SECRET)
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256").strip()
-JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "15"))
+JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+JWT_REFRESH_EXPIRE_MINUTES = int(os.getenv("JWT_REFRESH_EXPIRE_MINUTES", "10080"))
 CSRF_HEADER_NAME = os.getenv("CSRF_HEADER_NAME", "X-CSRF-Token").strip()
 ENABLE_HSTS = _normalize_toggle_setting(
     os.getenv("ENABLE_HSTS", "auto"),

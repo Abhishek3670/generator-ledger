@@ -32,12 +32,11 @@ class DatabaseManager:
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def _resolve_database_url(self, database_url: Optional[str]) -> str:
-        candidate = (database_url or "").strip() or DATABASE_URL or os.getenv("TEST_DATABASE_URL", "").strip()
+        # SAFETY: Production code NEVER reads TEST_DATABASE_URL.
+        # See SAFETY.md rule S3.
+        candidate = (database_url or "").strip() or DATABASE_URL or ""
         if candidate and "://" not in candidate:
-            fallback = (
-                os.getenv("DATABASE_URL", "").strip()
-                or os.getenv("TEST_DATABASE_URL", "").strip()
-            )
+            fallback = os.getenv("DATABASE_URL", "").strip()
             if fallback:
                 self.logger = logging.getLogger(self.__class__.__name__)
                 self.logger.warning(
