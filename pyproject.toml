@@ -39,6 +39,15 @@ pythonpath = ["."]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v"
+# SAFETY: Tests require TEST_DATABASE_URL pointing to a dedicated test database.
+# NEVER run pytest directly with production DATABASE_URL. See SAFETY.md.
+#
+# Recommended usage:
+#   source .env.test && ./scripts/run_tests.sh
+#
+# The run_tests.sh script enforces all safety pre-flight checks before
+# executing pytest. If you must run pytest directly, ensure TEST_DATABASE_URL
+# is set to a URL containing 'test' in the database name.
 
 [tool.setuptools]
 packages = ["core", "cli", "web", "scripts"]

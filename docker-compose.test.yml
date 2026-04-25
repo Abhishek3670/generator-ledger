@@ -1,0 +1,30 @@
+# ==========================================================================
+# TEST-ONLY infrastructure — NEVER used in production.
+# See SAFETY.md for database isolation rules.
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up -d
+#   source .env.test
+#   ./scripts/run_tests.sh
+# ==========================================================================
+
+services:
+  test-db:
+    image: postgres:15-alpine
+    container_name: genset-test-db
+    ports:
+      - "7899:5432"
+    environment:
+      POSTGRES_USER: genset_test_user
+      POSTGRES_PASSWORD: test_only_password
+      POSTGRES_DB: ledger_db_test
+    volumes:
+      - genset_test_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U genset_test_user -d ledger_db_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  genset_test_pgdata:
